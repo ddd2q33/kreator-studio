@@ -1,0 +1,309 @@
+/* ============================================================
+   TRAUMA-BOOK-TEMPLATE — main.css
+   Design system for therapeutic workbooks (screen + print).
+   Palette, type scale, front/back matter, headings, prose.
+   ============================================================ */
+
+:root {
+  /* Paper */
+  --paper: #ffffff;
+  --paper-warm: #faf8f5;
+  --paper-shade: #f3f0ea;
+
+  /* Ink */
+  --ink: #2b2723;
+  --ink-soft: #5c554d;
+  --ink-faint: #8a8178;
+
+  /* Accents (muted, print-safe) */
+  --accent: #53616e;        /* calm slate blue */
+  --accent-deep: #3d4956;
+  --accent-wash: #eef2f5;   /* insight blue */
+  --accent-warm: #f5efe6;   /* reflection beige */
+  --accent-warm-deep: #8a6d3b;
+  --accent-green: #eaf2ec;  /* therapist green */
+  --accent-green-deep: #4a6b52;
+  --accent-purple: #f1eef6; /* science purple */
+  --accent-purple-deep: #5d5377;
+  --accent-amber: #fdf6e3;  /* important amber */
+  --accent-amber-deep: #8a6a1f;
+  --rule: #ddd6cc;          /* hairlines */
+  --rule-soft: #e9e4db;
+
+  /* Type */
+  --serif: "Lora", "Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---------- Base ---------- */
+
+* { box-sizing: border-box; }
+
+html { font-size: 11.5pt; }
+
+body {
+  margin: 0;
+  background: var(--paper-warm);
+  color: var(--ink);
+  font-family: var(--serif);
+  line-height: 1.62;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+.book-page {
+  background: var(--paper);
+  max-width: 6in;
+  min-height: 9in;
+  margin: 32px auto;
+  padding: 0.6in 0.5in 0.75in 0.75in;
+  box-shadow: 0 2px 24px rgba(43, 39, 35, 0.10);
+}
+
+/* ---------- Headings ---------- */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--sans);
+  color: var(--ink);
+  line-height: 1.25;
+  page-break-after: avoid;
+  break-after: avoid;
+}
+
+h2 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 1.8em 0 0.7em;
+  padding-bottom: 0.35em;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 1.5em 0 0.55em;
+}
+
+h4 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 1.2em 0 0.45em;
+}
+
+p { margin: 0 0 0.95em; orphans: 2; widows: 2; }
+
+strong { font-weight: 700; }
+em { font-style: italic; }
+
+a { color: var(--accent-deep); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 2em 0;
+}
+
+blockquote {
+  margin: 1.4em 0;
+  padding: 0.2em 0 0.2em 1.1em;
+  border-left: 3px solid var(--rule);
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+ul, ol { margin: 0 0 1em; padding-left: 1.35em; }
+li { margin: 0.3em 0; }
+li::marker { color: var(--accent); }
+
+code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--paper-shade);
+  padding: 0.08em 0.35em;
+  border-radius: 3px;
+}
+
+/* ---------- Lists: elegant therapeutic bullets ---------- */
+
+ul.therapy-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.6em 0 1.2em;
+}
+
+ul.therapy-list li {
+  position: relative;
+  padding-left: 1.5em;
+  margin: 0.55em 0;
+}
+
+ul.therapy-list li::before {
+  content: "";
+  position: absolute;
+  left: 0.35em;
+  top: 0.62em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ---------- Chapter opener ---------- */
+
+.chapter-opener {
+  text-align: center;
+  padding: 1.1in 0 0.55in;
+  page-break-before: always;
+  break-before: page;
+}
+
+.chapter-opener .opener-rule {
+  width: 3.2em;
+  height: 1px;
+  background: var(--accent);
+  margin: 0 auto 1.6em;
+  border: 0;
+}
+
+.chapter-opener .opener-kicker {
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.4em;
+}
+
+.chapter-opener .opener-title {
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 1.1em;
+  border: 0;
+  padding: 0;
+}
+
+.chapter-opener .opener-intro {
+  max-width: 33em;
+  margin: 0 auto 1.6em;
+  text-align: center;
+  color: var(--ink-soft);
+  font-style: italic;
+  font-size: 1.02rem;
+  line-height: 1.7;
+}
+
+.chapter-opener .opener-reflection {
+  max-width: 34em;
+  margin: 0 auto;
+  padding-top: 1.2em;
+  border-top: 1px solid var(--rule-soft);
+  font-size: 0.98rem;
+  color: var(--accent-deep);
+}
+
+/* ---------- Front matter ---------- */
+
+.fm-titlepage { text-align: center; padding-top: 1.6in; page-break-before: always; break-before: page; }
+.fm-titlepage .fm-kicker {
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 1.4em;
+}
+.fm-titlepage .fm-title {
+  font-size: 2.3rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.3em;
+  border: 0;
+}
+.fm-titlepage .fm-subtitle {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 1.15rem;
+  color: var(--ink-soft);
+  margin: 0 auto 2.2em;
+  max-width: 26em;
+}
+.fm-titlepage .fm-author {
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.fm-titlepage .fm-publisher {
+  margin-top: 2.6em;
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.fm-page { page-break-before: always; break-before: page; padding-top: 0.4in; }
+.fm-page h2 {
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-bottom: 0;
+  margin: 0 0 1.2em;
+}
+
+.fm-copyright p, .fm-disclaimer p { font-size: 0.85rem; color: var(--ink-soft); line-height: 1.75; }
+
+.fm-disclaimer {
+  margin: 1.6em 0;
+  padding: 1em 1.2em;
+  background: var(--accent-amber);
+  border: 1px solid #efe3b8;
+  font-size: 0.85rem;
+}
+
+.fm-dedication {
+  page-break-before: always;
+  break-before: page;
+  padding-top: 2.4in;
+  text-align: center;
+  font-style: italic;
+  font-size: 1.12rem;
+  color: var(--ink-soft);
+  line-height: 1.9;
+}
+
+/* ---------- Running heads & folios (print) ---------- */
+
+.pbook-running-head {
+  font-family: var(--sans);
+  font-size: 0.7rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0;
+}
+
+.pbook-folio { font-family: var(--sans); font-size: 0.75rem; color: var(--ink-faint); }
+
+@page :left  { margin: 0.6in 0.75in 0.6in 0.5in; @top-left { content: string(booktitle); } @bottom-center { content: counter(page); } }
+@page :right { margin: 0.6in 0.5in 0.6in 0.75in; @top-right { content: string(chaptertitle); } @bottom-center { content: counter(page); } }
+@page :first { margin: 0.6in 0.5in 0.6in 0.75in; @top-left { content: none; } @top-right { content: none; } }
+
+/* Screen: hide pseudo-page furniture */
+@media screen {
+  .pbook-running-head, .pbook-folio { display: none; }
+}
+
+/* ---------- Utility ---------- */
+
+.page-break { page-break-before: always; break-before: page; }
+.smallcaps { font-variant: small-caps; letter-spacing: 0.06em; }

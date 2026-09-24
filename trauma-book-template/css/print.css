@@ -1,0 +1,77 @@
+/* ============================================================
+   TRAUMA-BOOK-TEMPLATE — print.css
+   Amazon KDP paperback, 6" × 9".
+   Margins (user spec): outside 0.5", gutter/inside 0.75",
+   top/bottom 0.6" + running head zone.
+   ============================================================ */
+
+@media print {
+  html { font-size: 10.5pt; }
+
+  body { background: #fff; }
+
+  /* One sheet = one page. */
+  .book-page {
+    max-width: none;
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  /* Exact page geometry */
+  @page {
+    size: 6in 9in;
+    margin: 0.75in 0.5in 0.65in 0.75in; /* top right bottom left (recto) */
+  }
+
+  @page :left {
+    margin: 0.75in 0.75in 0.65in 0.5in; /* mirrored: gutter on the right */
+  }
+
+  /* Front matter, part titles, chapter openers have no running head */
+  .frontmatter-page,
+  .chapter-opener,
+  .fm-titlepage,
+  .fm-page,
+  .fm-dedication {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  .frontmatter-page:blank,
+  .chapter-opener:blank { display: none; }
+
+  /* Keep component boxes whole */
+  .box,
+  .worksheet,
+  .reflection-exercise,
+  .chapter-summary,
+  .diagram,
+  .figure,
+  .pull-quote,
+  .table-wrap {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Long tools may flow across pages, but never split a section label from its content */
+  .tool-section { page-break-inside: avoid; break-inside: avoid; }
+
+  h2, h3, h4 { page-break-after: avoid; break-after: avoid; }
+
+  /* Print-safe: emphasize structure with borders/gray, not saturated color */
+  .box-insight    { background: #f2f4f6 !important; }
+  .box-science    { background: #f3f1f7 !important; }
+  .box-reflection { background: #f7f3ec !important; }
+  .box-therapist  { background: #eff4f0 !important; }
+  .box-important  { background: #faf5e6 !important; }
+
+  table.therapy-table th { background: #f2f4f6 !important; }
+
+  a { color: inherit; text-decoration: none; }
+
+  /* No web artifacts */
+  .no-print { display: none !important; }
+}

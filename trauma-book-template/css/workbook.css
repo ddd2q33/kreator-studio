@@ -1,0 +1,387 @@
+/* ============================================================
+   TRAUMA-BOOK-TEMPLATE — workbook.css
+   Therapeutic components: numbered tools, callout boxes,
+   worksheets with writing lines, diagrams, quotes, summaries.
+   ============================================================ */
+
+/* ---------- Numbered therapeutic tool ---------- */
+
+.tool {
+  margin: 2em 0 2.2em;
+  padding-top: 1.3em;
+  border-top: 2px solid var(--rule);
+}
+
+.tool-head {
+  margin-bottom: 0.9em;
+}
+
+.tool-kicker {
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.3em;
+}
+
+.tool-title {
+  font-size: 1.45rem;
+  font-weight: 600;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.tool-section { margin: 1.1em 0; }
+
+.tool-label {
+  display: block;
+  font-family: var(--sans);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+  margin-bottom: 0.4em;
+}
+
+.tool p { margin-bottom: 0.8em; }
+
+/* ---------- Callout boxes ---------- */
+
+.box {
+  margin: 1.5em 0;
+  padding: 1.05em 1.25em 0.85em;
+  page-break-inside: avoid;
+  break-inside: avoid;
+  border-radius: 6px;
+}
+
+.box .box-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-family: var(--sans);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  margin: 0 0 0.55em;
+}
+
+.box .box-label::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+}
+
+.box p:last-child { margin-bottom: 0.2em; }
+
+.box-insight   { background: var(--accent-wash);   border-left: 3px solid var(--accent); }
+.box-insight   .box-label { color: var(--accent-deep); }
+
+.box-science   { background: var(--accent-purple); border-left: 3px solid var(--accent-purple-deep); }
+.box-science   .box-label { color: var(--accent-purple-deep); }
+
+.box-reflection{ background: var(--accent-warm);   border-left: 3px solid var(--accent-warm-deep); }
+.box-reflection .box-label { color: var(--accent-warm-deep); }
+
+.box-therapist { background: var(--accent-green);  border-left: 3px solid var(--accent-green-deep); }
+.box-therapist .box-label { color: var(--accent-green-deep); }
+
+.box-important { background: var(--accent-amber);  border-left: 3px solid var(--accent-amber-deep); }
+.box-important .box-label { color: var(--accent-amber-deep); }
+
+/* ---------- Pull quote ---------- */
+
+.pull-quote {
+  margin: 2.2em auto;
+  max-width: 30em;
+  padding: 0 1em;
+  text-align: center;
+  font-style: italic;
+  font-size: 1.18rem;
+  line-height: 1.75;
+  color: var(--accent-deep);
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.pull-quote::before,
+.pull-quote::after {
+  content: "";
+  display: block;
+  width: 2.6em;
+  height: 1px;
+  background: var(--rule);
+  margin: 1.1em auto;
+}
+
+/* ---------- Worksheets ---------- */
+
+.worksheet {
+  margin: 1.8em 0;
+  padding: 1.2em 1.3em 1.3em;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.worksheet-head { margin-bottom: 0.8em; }
+
+.worksheet-kicker {
+  font-family: var(--sans);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--accent-warm-deep);
+  margin: 0 0 0.25em;
+}
+
+.worksheet-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.worksheet .ws-purpose {
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+  margin-bottom: 0.9em;
+}
+
+.ws-instructions {
+  font-size: 0.95rem;
+  margin-bottom: 1em;
+}
+
+.write-line {
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  height: 2em;
+  margin: 0;
+}
+
+.write-line + .write-line { margin-top: 0.35em; }
+
+.ws-lines { margin: 0.6em 0 0; }
+
+.ws-question {
+  display: block;
+  font-family: var(--sans);
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 1.1em 0 0.15em;
+}
+
+.ws-question .q-num {
+  color: var(--accent);
+  margin-right: 0.4em;
+}
+
+/* ---------- Reflection exercise ---------- */
+
+.reflection-exercise {
+  margin: 1.8em 0;
+  padding: 1.15em 1.3em;
+  background: var(--accent-warm);
+  border-radius: 8px;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.reflection-exercise .refl-title {
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0 0 0.6em;
+}
+
+.reflection-exercise .refl-before {
+  font-size: 0.95rem;
+  margin-bottom: 0.9em;
+}
+
+/* ---------- Chapter summary ---------- */
+
+.chapter-summary {
+  margin: 2em 0;
+  padding: 1.25em 1.35em 1.1em;
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--accent);
+  border-radius: 0 0 8px 8px;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.chapter-summary .summary-title {
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+  margin: 0 0 0.9em;
+}
+
+.chapter-summary h4 {
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 1em 0 0.35em;
+}
+
+.chapter-summary ul { margin-bottom: 0.4em; }
+
+/* ---------- Vertical diagrams ---------- */
+
+.diagram {
+  margin: 1.8em auto;
+  max-width: 21em;
+  text-align: center;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.diagram-node {
+  font-family: var(--sans);
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--paper-shade);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.55em 1em;
+}
+
+.diagram-node.diagram-accent {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.diagram-arrow {
+  display: block;
+  color: var(--ink-faint);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0.28em 0;
+}
+
+.diagram-caption,
+.figure-caption {
+  font-family: var(--sans);
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+  margin-top: 0.7em;
+}
+
+/* ---------- Figures ---------- */
+
+.figure {
+  margin: 1.8em auto;
+  text-align: center;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.figure img {
+  max-width: 88%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.figure figcaption {
+  font-family: var(--sans);
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+  margin-top: 0.6em;
+}
+
+/* ---------- Tables ---------- */
+
+.table-wrap { margin: 1.5em 0; page-break-inside: avoid; break-inside: avoid; }
+
+table.therapy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+table.therapy-table caption {
+  caption-side: top;
+  text-align: left;
+  font-family: var(--sans);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+  padding-bottom: 0.55em;
+}
+
+table.therapy-table th {
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--accent-deep);
+  background: var(--accent-wash);
+  padding: 0.55em 0.75em;
+  border-bottom: 1.5px solid var(--accent);
+}
+
+table.therapy-table td {
+  padding: 0.6em 0.75em;
+  border-bottom: 1px solid var(--rule-soft);
+  vertical-align: top;
+}
+
+table.therapy-table tr:last-child td { border-bottom: 0; }
+
+/* ---------- Resources / back matter ---------- */
+
+.resource-list { list-style: none; padding-left: 0; margin: 0.8em 0 1.4em; }
+
+.resource-list li {
+  position: relative;
+  padding-left: 1.5em;
+  margin: 0.6em 0;
+  font-size: 0.95rem;
+}
+
+.resource-list li::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
+/* ---------- Print adjustments for components ---------- */
+
+@media print {
+  .box, .worksheet, .reflection-exercise, .chapter-summary, .diagram, .figure, .table-wrap {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .box { border-radius: 0; }
+  .worksheet { border-radius: 0; }
+}
