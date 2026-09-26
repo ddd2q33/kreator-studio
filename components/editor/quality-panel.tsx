@@ -266,6 +266,40 @@ export function QualityPanel({
             </ul>
           )}
         </div>
+
+        <div className="border-t bg-muted/30 p-3">
+          <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Keyboard shortcuts
+          </span>
+          <ul className="space-y-1">
+            {[
+              { keys: ["Ctrl", "B"], label: "Bold" },
+              { keys: ["Ctrl", "I"], label: "Italic" },
+              { keys: ["Ctrl", "K"], label: "Insert link" },
+              { keys: ["Ctrl", "⇧", "2"], label: "Heading 2" },
+              { keys: ["Ctrl", "⇧", "3"], label: "Heading 3" },
+              { keys: ["Tab"], label: "Indent selected lines" },
+              { keys: ["⇧", "Tab"], label: "Dedent selected lines" },
+            ].map(({ keys, label }) => (
+              <li
+                key={label}
+                className="flex items-center justify-between gap-2 text-xs"
+              >
+                <span className="text-muted-foreground">{label}</span>
+                <span className="flex items-center gap-0.5">
+                  {keys.map((key) => (
+                    <kbd
+                      key={key}
+                      className="rounded border bg-background px-1 py-px font-mono text-[10px] font-medium text-foreground shadow-sm"
+                    >
+                      {key}
+                    </kbd>
+                  ))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
     </div>
   );

@@ -24,7 +24,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -37,6 +36,7 @@ import {
   Copy,
   Download,
   Eye,
+  Keyboard,
   FileCode2,
   FileDown,
   FilePlus,
@@ -56,6 +56,7 @@ import {
   FolderOpen,
   FolderDown,
   FolderUp,
+  ListTree,
 } from "lucide-react";
 import { TEMPLATES, getTemplate } from "./templates";
 import {
@@ -83,7 +84,7 @@ import {
   type ProjectDoc,
   type ProjectRevision,
 } from "@/lib/projects";
-import { MarkdownToolbar } from "@/components/editor/writer-toolbar";
+import { MarkdownToolbar, applyMarkdown } from "@/components/editor/writer-toolbar";
 import { VideoStudio } from "@/components/editor/video-studio";
 import { ProjectManager } from "@/components/editor/project-manager";
 import { PresetsPanel } from "@/components/editor/presets-panel";
@@ -91,6 +92,8 @@ import { BlocksPanel } from "@/components/editor/blocks-panel";
 import { RevisionsPanel } from "@/components/editor/revisions-panel";
 import { CommentsPanel } from "@/components/editor/comments-panel";
 import { QualityPanel } from "@/components/editor/quality-panel";
+import { OutlinePanel } from "@/components/editor/outline-panel";
+import { WritingMetrics } from "@/components/editor/writing-metrics";
 import { checkQuality } from "@/lib/quality-check";
 import { BOOK_PRESETS, presetById } from "@/components/editor/book-presets";
 
@@ -418,9 +421,44 @@ export default function MarkdownConverter() {
     | "revisions"
     | "notes"
     | "quality"
+    | "outline"
     | null
   >(null);
   const [studioMode, setStudioMode] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const splitRef = useRef<HTMLDivElement>(null);
+  const [editorSplit, setEditorSplit] = useState(50);
+
+  const beginResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const container = splitRef.current;
+    if (!container) return;
+    const startX = e.clientX;
+    const startW = startX / container.getBoundingClientRect().width;
+    const onMove = (ev: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const ratio = Math.min(0.85, Math.max(0.15, startW + (ev.clientX - startX) / rect.width));
+      setEditorSplit(Math.round(ratio * 100));
+    };
+    const onUp = () => {
+      document.body.classList.remove("cursor-col-resize", "select-none");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    document.body.classList.add("cursor-col-resize", "select-none");
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, []);
+
+  useEffect(() => {
+    if (!shortcutsOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShortcutsOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [shortcutsOpen]);
 
   const hydrateFromDoc = useCallback((doc: ProjectDoc) => {
     const template = getTemplate(doc.activeTemplate);
@@ -705,6 +743,113 @@ export default function MarkdownConverter() {
       : bookMode
         ? (chapters[activeChapter]?.markdown ?? "")
         : markdown;
+
+  const updateBookEditor = useCallback(
+    (value: string) => {
+      setChapters((prev) =>
+        prev.map((c, i) =>
+          i === activeChapter ? { ...c, markdown: value } : c,
+        ),
+      );
+    },
+    [activeChapter],
+  );
+
+  const emitEditorChange = useCallback((next: string) => {
+    if (sourceMode === "json") setJsonText(next);
+    else if (bookMode) updateBookEditor(next);
+    else setMarkdown(next);
+  }, [sourceMode, bookMode, updateBookEditor]);
+
+  const handleEditorKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      if (mod && !e.shiftKey && key === "b") {
+        e.preventDefault();
+        applyMarkdown(
+          editorRef,
+          editorText,
+          (sel) => (sel ? `**${sel}**` : "**bold text**"),
+          emitEditorChange,
+        );
+        return;
+      }
+      if (mod && !e.shiftKey && key === "i") {
+        e.preventDefault();
+        applyMarkdown(
+          editorRef,
+          editorText,
+          (sel) => (sel ? `*${sel}*` : "*italic text*"),
+          emitEditorChange,
+        );
+        return;
+      }
+      if (mod && !e.shiftKey && key === "k") {
+        e.preventDefault();
+        applyMarkdown(
+          editorRef,
+          editorText,
+          (sel) => `[${sel || "link text"}](https://)`,
+          emitEditorChange,
+        );
+        return;
+      }
+      if (mod && e.shiftKey && key === "2") {
+        e.preventDefault();
+        applyMarkdown(
+          editorRef,
+          editorText,
+          (sel) => (sel ? sel : "## Heading\n\n"),
+          emitEditorChange,
+        );
+        return;
+      }
+      if (mod && e.shiftKey && key === "3") {
+        e.preventDefault();
+        applyMarkdown(
+          editorRef,
+          editorText,
+          (sel) => (sel ? sel : "### Heading\n\n"),
+          emitEditorChange,
+        );
+        return;
+      }
+
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const el = e.currentTarget;
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        const lineStart = editorText.lastIndexOf("\n", start - 1) + 1;
+        let lineEnd = editorText.indexOf("\n", end);
+        if (lineEnd === -1) lineEnd = editorText.length;
+        const lines = editorText.slice(lineStart, lineEnd).split("\n");
+        const dedent = e.shiftKey;
+        const nextBlock = lines
+          .map((l) =>
+            dedent
+              ? l.startsWith("  ")
+                ? l.slice(2)
+                : l.startsWith("- ") || l.startsWith("* ")
+                  ? l.slice(2)
+                  : l
+              : `  ${l}`,
+          )
+          .join("\n");
+        const next =
+          editorText.slice(0, lineStart) + nextBlock + editorText.slice(lineEnd);
+        emitEditorChange(next);
+        requestAnimationFrame(() => {
+          el.focus();
+          const pos = lineStart + nextBlock.length;
+          el.setSelectionRange(pos, pos);
+        });
+      }
+    },
+    [editorText, emitEditorChange],
+  );
 
   const stats = useMemo(() => {
     const trimmed = editorText.trim();
@@ -1050,17 +1195,6 @@ export default function MarkdownConverter() {
       return true;
     });
   }, [chapters.length, markdown]);
-
-  const updateBookEditor = useCallback(
-    (value: string) => {
-      setChapters((prev) =>
-        prev.map((c, i) =>
-          i === activeChapter ? { ...c, markdown: value } : c,
-        ),
-      );
-    },
-    [activeChapter],
-  );
 
   const compileBook = useCallback(() => {
     if (chapters.length === 0) {
@@ -1605,7 +1739,7 @@ export default function MarkdownConverter() {
               }`}
             >
               <FileText className="size-3.5" />
-              Book Editor
+              Manuscript Editor
             </button>
             <button
               type="button"
@@ -1812,11 +1946,6 @@ export default function MarkdownConverter() {
               Chapters .zip
               {isExportingZip && <span className="ml-auto text-xs text-muted-foreground">Zipping…</span>}
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={copyHtml}>
-              <Copy />
-              {copied ? "Copied!" : "Copy HTML"}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -1861,8 +1990,14 @@ export default function MarkdownConverter() {
           />
         </div>
       ) : (
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-2">
-        <section className="flex min-h-0 flex-row border-b lg:border-b-0 lg:border-r">
+      <div
+        ref={splitRef}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row"
+      >
+        <section
+          className="flex min-h-0 shrink-0 flex-row border-b lg:w-[var(--editor-w)] lg:border-b-0"
+          style={{ "--editor-w": `${editorSplit}%` } as React.CSSProperties}
+        >
           <nav
             className="flex w-10 shrink-0 flex-col items-center gap-1 border-r bg-muted/40 py-2"
             aria-label="Editor panels"
@@ -1873,6 +2008,7 @@ export default function MarkdownConverter() {
               { id: "blocks", icon: Blocks, label: "Blocks" },
               { id: "revisions", icon: History, label: "Revisions", count: currentProject?.revisions.length },
               { id: "notes", icon: MessageSquarePlus, label: "Notes", count: currentProject?.comments.filter((c) => !c.resolved).length },
+              { id: "outline", icon: ListTree, label: "Outline" },
               { id: "quality", icon: ShieldAlert, label: "Quality", count: qualityIssues.length, isQuality: true },
             ].map(({ id, icon: RailIcon, label, count, isQuality }) => (
               <button
@@ -1974,10 +2110,25 @@ export default function MarkdownConverter() {
                   onClose={() => setPanel(null)}
                 />
               )}
+              {panel === "outline" && (
+                <OutlinePanel
+                  text={editorText}
+                  onNavigate={(offset) => {
+                    const el = editorRef.current;
+                    if (!el) return;
+                    el.focus();
+                    el.setSelectionRange(offset, offset);
+                    const line = editorText.slice(0, offset).split("\n").length - 1;
+                    const lineHeight = 21;
+                    el.scrollTop = Math.max(0, line * lineHeight - el.clientHeight / 2);
+                  }}
+                  onClose={() => setPanel(null)}
+                />
+              )}
             </aside>
           )}
           <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-center justify-between border-b bg-muted/50 px-4 py-2">
+          <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-2">
             {bookMode ? (
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Chapters ({chapters.length})
@@ -2014,15 +2165,20 @@ export default function MarkdownConverter() {
                 </button>
               </div>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyMarkdown}
-              className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <Copy />
-              Copy
-            </Button>
+            {hydrated && !bookMode && sourceMode === "markdown" && (
+              <WritingMetrics text={editorText} hydrated={hydrated} />
+            )}
+            <span className="ml-auto flex items-center">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={copyMarkdown}
+                className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <Copy />
+                Copy
+              </Button>
+            </span>
           </div>
           {bookMode && (
             <ul
@@ -2105,6 +2261,7 @@ export default function MarkdownConverter() {
               else if (bookMode) updateBookEditor(e.target.value);
               else setMarkdown(e.target.value);
             }}
+            onKeyDown={handleEditorKeyDown}
             spellCheck={false}
             placeholder={
               sourceMode === "json"
@@ -2126,6 +2283,20 @@ export default function MarkdownConverter() {
             <span>{stats.words} words</span>
             <Separator orientation="vertical" className="h-3" />
             <span>{stats.lines} lines</span>
+            {sourceMode !== "json" && (
+              <>
+                <Separator orientation="vertical" className="hidden h-3 md:block" />
+                <button
+                  type="button"
+                  onClick={() => setShortcutsOpen(true)}
+                  className="hidden items-center gap-1 rounded border bg-background/80 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:border-ring hover:text-foreground md:inline-flex"
+                  aria-label="Keyboard shortcuts"
+                >
+                  <Keyboard className="size-3" />
+                  Shortcuts
+                </button>
+              </>
+            )}
             {sourceMode === "json" &&
               (jsonConversion.error ? (
                 <span className="font-medium text-red-600 dark:text-red-400">
@@ -2195,7 +2366,14 @@ export default function MarkdownConverter() {
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-col">
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize editor"
+          onPointerDown={beginResize}
+          className="hidden w-1 shrink-0 cursor-col-resize touch-none items-stretch justify-center bg-border/60 transition-colors hover:bg-border lg:flex"
+        />
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
           {customizerOpen && (
             <div className="border-b bg-muted/30 px-4 py-2.5">
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -2368,6 +2546,15 @@ export default function MarkdownConverter() {
                   HTML
                 </TabsTrigger>
               </TabsList>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={copyHtml}
+                className="h-6 gap-1 px-2 text-xs"
+              >
+                <Copy />
+                {copied ? "Copied!" : "Copy HTML"}
+              </Button>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <FileText className="size-3.5" />
                 <Select
@@ -2492,6 +2679,71 @@ export default function MarkdownConverter() {
           </Tabs>
         </section>
       </div>
+      )}
+      {shortcutsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShortcutsOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Keyboard shortcuts"
+        >
+          <div
+            className="w-full max-w-sm overflow-hidden rounded-lg border bg-background shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b px-4 py-2.5">
+              <span className="flex items-center gap-1.5 text-sm font-semibold">
+                <Keyboard className="size-4" />
+                Keyboard Shortcuts
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => setShortcutsOpen(false)}
+                aria-label="Close keyboard shortcuts"
+              >
+                <X />
+                Close
+              </Button>
+            </div>
+            <div className="p-4">
+              <ul className="space-y-1.5">
+                {[
+                  { keys: ["Ctrl", "B"], label: "Bold" },
+                  { keys: ["Ctrl", "I"], label: "Italic" },
+                  { keys: ["Ctrl", "K"], label: "Insert link" },
+                  { keys: ["Ctrl", "⇧", "2"], label: "Heading 2" },
+                  { keys: ["Ctrl", "⇧", "3"], label: "Heading 3" },
+                  { keys: ["Tab"], label: "Indent selected lines" },
+                  { keys: ["⇧", "Tab"], label: "Dedent selected lines" },
+                ].map(({ keys, label }) => (
+                  <li
+                    key={label}
+                    className="flex items-center justify-between gap-2 text-xs"
+                  >
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="flex items-center gap-0.5">
+                      {keys.map((key) => (
+                        <kbd
+                          key={key}
+                          className="rounded border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-foreground shadow-sm"
+                        >
+                          {key}
+                        </kbd>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 border-t pt-2 text-[11px] text-muted-foreground">
+                Mac: use <kbd className="rounded border bg-muted/50 px-1 font-mono text-[10px]">⌘</kbd> instead
+                of <kbd className="rounded border bg-muted/50 px-1 font-mono text-[10px]">Ctrl</kbd>.
+              </p>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
