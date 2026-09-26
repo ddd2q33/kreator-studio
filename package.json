@@ -2,12 +2,16 @@
   "name": "book-studio",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "book-author": "bin/book-author.mjs"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "node --test \"tests/*.test.ts\"",
     "book:build": "node trauma-book-template/build.mjs",
     "book:pdf": "node trauma-book-template/to-pdf.mjs",
     "book:watch": "node trauma-book-template/watch.mjs"
@@ -17,6 +21,7 @@
     "cn": "^0.3.0",
     "docx": "^9.7.1",
     "highlight.js": "^11.12.0",
+    "jszip": "^3.10.2",
     "lucide-react": "^1.47.0",
     "marked": "^18.0.13",
     "next": "16.3.5",

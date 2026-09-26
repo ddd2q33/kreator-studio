@@ -5,26 +5,9 @@ import {
   useState,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
 } from "react";
-import { Marked, Parser, type Token, type Tokens } from "marked";
-import hljs from "highlight.js/lib/core";
-import javascript from "highlight.js/lib/languages/javascript";
-import typescript from "highlight.js/lib/languages/typescript";
-import python from "highlight.js/lib/languages/python";
-import bash from "highlight.js/lib/languages/bash";
-import json from "highlight.js/lib/languages/json";
-import xml from "highlight.js/lib/languages/xml";
-import css from "highlight.js/lib/languages/css";
-import sql from "highlight.js/lib/languages/sql";
-import java from "highlight.js/lib/languages/java";
-import cpp from "highlight.js/lib/languages/cpp";
-import c from "highlight.js/lib/languages/c";
-import csharp from "highlight.js/lib/languages/csharp";
-import rust from "highlight.js/lib/languages/rust";
-import go from "highlight.js/lib/languages/go";
-import php from "highlight.js/lib/languages/php";
-import yaml from "highlight.js/lib/languages/yaml";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,14 +21,24 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  BookMarked,
   BookOpen,
   ChevronDown,
   ChevronUp,
+  Clapperboard,
   Code2,
   Copy,
   Download,
   Eye,
   FileCode2,
+  FileDown,
   FilePlus,
   FileText,
   Folder,
@@ -53,6 +46,7 @@ import {
   Palette,
   Plus,
   RotateCcw,
+  ShieldAlert,
   Trash2,
   X,
   Library,
@@ -60,6 +54,8 @@ import {
   MessageSquarePlus,
   Blocks,
   FolderOpen,
+  FolderDown,
+  FolderUp,
 } from "lucide-react";
 import { TEMPLATES, getTemplate } from "./templates";
 import {
@@ -68,7 +64,15 @@ import {
   suggestedFilename,
 } from "@/lib/docx-export";
 import { jsonToMarkdown } from "@/lib/json-to-markdown";
-import { processDirectives } from "@/lib/directives";
+import { htmlToEpubBlob } from "@/lib/epub-export";
+import {
+  createMarkdownRenderer,
+  hexToRgba,
+  titleFromMarkdown,
+  type ImageMap,
+} from "@/lib/render-engine";
+import { bookFromMarkdown, type BookFile } from "@/lib/book-files";
+import { bookToZip, zipToBook } from "@/lib/book-zip";
 import {
   createProject,
   loadProjectStore,
@@ -80,31 +84,15 @@ import {
   type ProjectRevision,
 } from "@/lib/projects";
 import { MarkdownToolbar } from "@/components/editor/writer-toolbar";
+import { VideoStudio } from "@/components/editor/video-studio";
 import { ProjectManager } from "@/components/editor/project-manager";
 import { PresetsPanel } from "@/components/editor/presets-panel";
 import { BlocksPanel } from "@/components/editor/blocks-panel";
 import { RevisionsPanel } from "@/components/editor/revisions-panel";
 import { CommentsPanel } from "@/components/editor/comments-panel";
+import { QualityPanel } from "@/components/editor/quality-panel";
+import { checkQuality } from "@/lib/quality-check";
 import { BOOK_PRESETS, presetById } from "@/components/editor/book-presets";
-
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("typescript", typescript);
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("json", json);
-hljs.registerLanguage("xml", xml);
-hljs.registerLanguage("css", css);
-hljs.registerLanguage("sql", sql);
-hljs.registerLanguage("java", java);
-hljs.registerLanguage("cpp", cpp);
-hljs.registerLanguage("c", c);
-hljs.registerLanguage("csharp", csharp);
-hljs.registerLanguage("rust", rust);
-hljs.registerLanguage("go", go);
-hljs.registerLanguage("php", php);
-hljs.registerLanguage("yaml", yaml);
-
-type ImageMap = Record<string, string>;
 
 function fileToDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -116,146 +104,6 @@ function fileToDataURL(file: File): Promise<string> {
   });
 }
 
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function resolveImage(href: string, images: ImageMap): string {
-  if (
-    href.startsWith("data:") ||
-    href.startsWith("http://") ||
-    href.startsWith("https://") ||
-    href.startsWith("blob:")
-  ) {
-    return href;
-  }
-  const normalized = href.replace(/\\/g, "/").replace(/^\.?\//, "");
-  const direct = images[normalized];
-  if (direct) return direct;
-  const base = normalized.split("/").pop()?.toLowerCase() ?? "";
-  return images[base] ?? href;
-}
-
-const RENDER_OPTIONS = { gfm: true, breaks: true } as const;
-
-function slugify(text: string): string {
-  return (
-    text
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/[*_`~]/g, "")
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "section"
-  );
-}
-
-/**
- * Hierarchical renderer: detects `# Chapter N. Title` / `# Part N.` openers and
- * drives the chapter/section counters from them. Content below the opener
- * becomes sections (##) and subsections (###) — no fake "Chapter 2" pages.
- */
-type Openers = { chapter: number; part: number };
-const CHAPTER_TITLE_RE = /^(chapter)\s+(\d+|[ivxlcdm]+)(?::|\.|—|–|-|\s)\s*/i;
-const PART_TITLE_RE = /^(part)\s+(\d+|[ivxlcdm]+)(?::|\.|—|–|-|\s)\s*/i;
-const ROMAN_VALUES: Record<string, number> = {
-  i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000,
-};
-function romanToNumber(roman: string): number {
-  const s = roman.toLowerCase();
-  let total = 0;
-  for (let i = 0; i < s.length; i++) {
-    const value = ROMAN_VALUES[s[i]] ?? 0;
-    const next = ROMAN_VALUES[s[i + 1]] ?? 0;
-    total += value < next ? -value : value;
-  }
-  return total;
-}
-function openerNumber(raw: string): number {
-  return /^\d+$/.test(raw) ? Number(raw) : romanToNumber(raw);
-}
-function openersFromHtml(html: string): Openers {
-  const re =
-    /<div class="(?:part-page|chapter-page)"[^>]*><p class="(?:part-kicker|chapter-label)"[^>]*>(Chapter|Part)\s+(\d+|[ivxlcdm]+)<\/p>/gi;
-  const out: Openers = { chapter: 0, part: 0 };
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html))) {
-    const n = openerNumber(m[2]);
-    if (m[1].toLowerCase() === "chapter") out.chapter = n;
-    else out.part = n;
-  }
-  return out;
-}
-
-function plainHeadingText(text: string): string {
-  return text
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[*_`]/g, "")
-    .trim();
-}
-
-const ADMONITION_TITLES: Record<string, string> = {
-  note: "Note",
-  tip: "Tip",
-  important: "Important",
-  warning: "Warning",
-  caution: "Caution",
-  "best-practice": "Best Practice",
-  error: "Error",
-  example: "Example",
-};
-
-const ADMONITION_ICONS: Record<string, string> = {
-  note: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`,
-  tip: `<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg>`,
-  important: `<svg viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-  warning: `<svg viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-  caution: `<svg viewBox="0 0 24 24"><path d="M7.86 2h8.28L22 7.86v8.28L16.14 22H7.86L2 16.14V7.86z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>`,
-  "best-practice": `<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>`,
-  error: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>`,
-  example: `<svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
-};
-
-function admonitionOf(
-  block: Token | undefined,
-): { kind: string; dropTokens: number } | null {
-  if (!block || block.type !== "paragraph") return null;
-  const para = block as Tokens.Paragraph;
-  const first = para.tokens?.[0];
-  if (!first || first.type !== "text") return null;
-  const m = /^\[!([a-z][a-z\s-]*)\]$/i.exec(first.text.trim());
-  if (!m) return null;
-  const kind = m[1].trim().toLowerCase().replace(/[\s]+/g, "-");
-  if (!ADMONITION_TITLES[kind]) return null;
-  const drop = para.tokens[1]?.type === "br" ? 2 : 1;
-  return { kind, dropTokens: Math.min(drop, para.tokens.length) };
-}
-
-/** First `# ` heading of a markdown doc, for chapter labels. */
-function titleFromMarkdown(md: string): string | null {
-  const m = /^#\s+(.+)$/m.exec(md);
-  return m ? m[1].trim() : null;
-}
-
-function hexToRgba(hex: string, alpha: number): string {
-  const clean = hex.replace("#", "");
-  const full =
-    clean.length === 3
-      ? clean.split("").map((c) => c + c).join("")
-      : clean;
-  const num = Number.parseInt(full, 16);
-  if (Number.isNaN(num)) return `rgba(0, 0, 0, ${alpha})`;
-  const r = (num >> 16) & 255;
-  const g = (num >> 8) & 255;
-  const b = num & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
 
 const ACCENT_SWATCHES = [
   "#3E5C76",
@@ -267,86 +115,6 @@ const ACCENT_SWATCHES = [
   "#5B4A8A",
   "#4F46E5",
 ];
-
-const FRONT_MATTER_RE = /^(part|book|chapter)\s+(\d+|[ivxlcdm]+)/i;
-
-function buildTocHtml(
-  rendered: string,
-  chapterDepth = 2,
-): string {
-  const entries: { depth: number; id: string; num: string; text: string }[] =
-    [];
-  const re =
-    /<div class="(part-page|chapter-page)"[^>]*><p class="(?:part-kicker|chapter-label)"[^>]*>([^<]*)<\/p><h([1-6]) id="([^"]+)"[^>]*>([\s\S]*?)<\/h\3>|<h([234]) id="([^"]+)"[^>]*>([\s\S]*?)<\/h\6>/g;
-  let chapter = 0;
-  let chapterSeen = false;
-  let section = 0;
-  let subsection = 0;
-  let chapterHasH2 = false;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(rendered))) {
-    if (match[1]) {
-      const isChapterPage = match[1] === "chapter-page";
-      const depth = Number(match[3]);
-      const label = match[2].trim();
-      const text = match[5].replace(/<[^>]+>/g, "").trim();
-      if (isChapterPage) {
-        const n = /(\d+)\s*$/.exec(label);
-        chapter = n ? Number(n[1]) : chapter + 1;
-        section = 0;
-        subsection = 0;
-        chapterHasH2 = false;
-        chapterSeen = true;
-      }
-      entries.push({ depth, id: match[4], num: label, text });
-      continue;
-    }
-    const depth = Number(match[6]);
-    const text = match[8].replace(/<[^>]+>/g, "").trim();
-    // Front-matter sections before the first chapter opener carry no number.
-    if (!chapterSeen) {
-      entries.push({ depth, id: match[7], num: "", text });
-      continue;
-    }
-    let num: string;
-    if (depth === 2) {
-      // A real `##` section: 1.1, 1.2, ...
-      section += 1;
-      subsection = 0;
-      chapterHasH2 = true;
-      num = `${chapter}.${section}`;
-    } else if (depth === 3) {
-      if (chapterHasH2) {
-        // `###` under a `##`: subsection 1.1.1
-        subsection += 1;
-        num = `${chapter}.${section}.${subsection}`;
-      } else {
-        // `###` with no `##` in this chapter: treat as a section (1.1)
-        section += 1;
-        subsection = 0;
-        num = `${chapter}.${section}`;
-      }
-    } else {
-      subsection += 1;
-      num = `${chapter}.${section || 0}.${subsection}`;
-    }
-    entries.push({ depth, id: match[7], num, text });
-  }
-  if (entries.length === 0) return "";
-  const rows = entries
-    .map(
-      (e) =>
-        `<li class="toc-l${e.depth}"><a href="#${e.id}"><span class="toc-num">${escapeAttr(e.num)}</span><span class="toc-text">${escapeAttr(e.text)}</span><span class="toc-pg"></span></a></li>`,
-    )
-    .join("");
-  return `<nav class="toc" aria-label="Table of contents"><div class="toc-title">Contents</div><ol>${rows}</ol></nav>`;
-}
-
-function hasTocMarker(markdown: string): boolean {
-  return (
-    /^\[toc\]\s*$/im.test(markdown) || /^<!--\s*toc\s*-->\s*$/im.test(markdown)
-  );
-}
 
 const STORAGE_KEY_TEXT = "markdown-converter-text";
 const STORAGE_KEY_IMAGES = "markdown-converter-images";
@@ -365,6 +133,46 @@ const DEFAULT_CUSTOM: CustomVariant = {
   font: "default",
   width: "default",
 };
+
+type StylePreset = {
+  id: string;
+  label: string;
+  swatch: string;
+  custom: CustomVariant;
+};
+
+const STYLE_PRESETS: StylePreset[] = [
+  {
+    id: "classic",
+    label: "Classic",
+    swatch: "#3E5C76",
+    custom: { accent: "#3E5C76", font: "serif", width: "narrow" },
+  },
+  {
+    id: "modern",
+    label: "Modern",
+    swatch: "#4F46E5",
+    custom: { accent: "#4F46E5", font: "sans", width: "wide" },
+  },
+  {
+    id: "minimal",
+    label: "Minimal",
+    swatch: "#52525B",
+    custom: { accent: "#52525B", font: "default", width: "default" },
+  },
+  {
+    id: "warm",
+    label: "Warm",
+    swatch: "#8C4A3F",
+    custom: { accent: "#8C4A3F", font: "serif", width: "default" },
+  },
+  {
+    id: "bold",
+    label: "Bold",
+    swatch: "#96660F",
+    custom: { accent: "#96660F", font: "sans", width: "full" },
+  },
+];
 
 type PersistedText = {
   activeTemplate: string;
@@ -557,6 +365,24 @@ const JSON_EXAMPLE = JSON.stringify(
 );
 
 export default function MarkdownConverter() {
+  const PAPER_SIZES = [
+    { id: "none", label: "No fixed page", widthMm: 0, heightMm: 0 },
+    { id: "a4", label: "A4", widthMm: 210, heightMm: 297 },
+    { id: "letter", label: "US Letter", widthMm: 216, heightMm: 279 },
+    { id: "legal", label: "US Legal", widthMm: 216, heightMm: 356 },
+    { id: "a5", label: "A5", widthMm: 148, heightMm: 210 },
+  ];
+  const toPx = (mm: number) => Math.round((mm / 25.4) * 96);
+  const PAGE_BREAK_CSS = [
+    ".book-chapter",
+    ".part-page",
+    ".chapter-page",
+    ".copyright-page",
+    ".dedication",
+    ".restricted",
+    ".toc",
+    "h1:not(:first-child)",
+  ].join(", ");
   const defaultTemplate = TEMPLATES[0];
   const [activeTemplate, setActiveTemplate] = useState(defaultTemplate.id);
   const [markdown, setMarkdown] = useState(defaultTemplate.content);
@@ -569,11 +395,15 @@ export default function MarkdownConverter() {
   const [jsonText, setJsonText] = useState("");
   const [htmlOverride, setHtmlOverride] = useState<string | null>(null);
   const [tab, setTab] = useState<"preview" | "html">("preview");
+  const [paperMode, setPaperMode] = useState<string>("none");
+  const [pageBreaks, setPageBreaks] = useState<number[]>([]);
+  const paperRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isExportingZip, setIsExportingZip] = useState(false);
   const [images, setImages] = useState<ImageMap>({});
   const [hydrated, setHydrated] = useState(false);
   const [autoSaved, setAutoSaved] = useState(false);
@@ -582,8 +412,15 @@ export default function MarkdownConverter() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [storeReady, setStoreReady] = useState(false);
   const [panel, setPanel] = useState<
-    "projects" | "presets" | "blocks" | "revisions" | "notes" | null
+    | "projects"
+    | "presets"
+    | "blocks"
+    | "revisions"
+    | "notes"
+    | "quality"
+    | null
   >(null);
+  const [studioMode, setStudioMode] = useState(false);
 
   const hydrateFromDoc = useCallback((doc: ProjectDoc) => {
     const template = getTemplate(doc.activeTemplate);
@@ -818,131 +655,12 @@ export default function MarkdownConverter() {
     return rules.join("\n");
   }, [custom]);
 
-  // Markdown → HTML pipeline shared by the preview, the compiled book and
-  // (via the same functions) every export.
-  const renderMarkdown = useMemo(() => {
-    const usedIds = new Map<string, number>();
-    const slugFor = (text: string): string => {
-      const base = slugify(text);
-      const n = usedIds.get(base) ?? 0;
-      usedIds.set(base, n + 1);
-      return n === 0 ? base : `${base}-${n + 1}`;
-    };
-    // Running counters for the technical theme's "Figure N.M —" captions.
-    const counters = { fig: 0, chapter: 0 };
-    const marked = new Marked(RENDER_OPTIONS).use({
-      renderer: {
-        image({ href, title, text }) {
-          const src = resolveImage(href, images);
-          counters.fig += 1;
-          const cap = title ? `<figcaption>Figure ${counters.chapter}.${counters.fig} — ${escapeAttr(title)}</figcaption>` : "";
-          const img = `<img src="${escapeAttr(src)}" alt="${escapeAttr(text)}"${title ? ` title="${escapeAttr(title)}"` : ""}>`;
-          return title
-            ? `<figure>${img}${cap}</figure>`
-            : img;
-        },
-        code({ text, lang }) {
-          const language = lang ? lang.toLowerCase() : "";
-          const className = language
-            ? ` class="hljs language-${language}"`
-            : ' class="hljs"';
-          let highlighted: string;
-          try {
-            highlighted =
-              language && hljs.getLanguage(language)
-                ? hljs.highlight(text, {
-                    language,
-                    ignoreIllegals: true,
-                  }).value
-                : hljs.highlightAuto(text).value;
-          } catch {
-            highlighted = escapeAttr(text);
-          }
-          const label = language
-            ? `<span class="code-lang">${escapeAttr(language)}</span>`
-            : "";
-          return `<div class="code-frame">${label}<pre><code${className}>${highlighted}</code></pre></div>`;
-        },
-        heading(token: Tokens.Heading) {
-          const plain = plainHeadingText(token.text);
-          const id = slugFor(plain);
-          const front = FRONT_MATTER_RE.exec(token.text);
-          if (front) {
-            const kind = front[1].toLowerCase();
-            const label = `${
-              kind === "book" ? "Book" : kind === "part" ? "Part" : "Chapter"
-            } ${front[2].toUpperCase()}`;
-            const rest = token.text
-              .slice(front[0].length)
-              .replace(/^[\s:·.—–-]+/, "")
-              .trim();
-            const titleHtml = rest
-              ? (marked.parseInline(rest, RENDER_OPTIONS) as string)
-              : "";
-            if (rest) {
-              if (kind === "chapter") {
-                counters.chapter = openerNumber(front[2]) || counters.chapter + 1;
-                counters.fig = 0;
-                return `<div class="chapter-page" style="counter-reset: fig 0"><p class="chapter-label">${escapeAttr(label)}</p><h${token.depth} id="${id}" class="chapter-title" style="counter-reset: fig 0 section 0 subsection 0">${titleHtml}</h${token.depth}><div class="part-ornament chapter-ornament" aria-hidden="true"></div></div>`;
-              }
-              return `<div class="part-page" style="counter-reset: fig 0"><p class="part-kicker">${escapeAttr(label)}</p><h${token.depth} id="${id}" class="part-title" style="counter-reset: fig 0 section 0 subsection 0">${titleHtml}</h${token.depth}><div class="part-ornament" aria-hidden="true"></div></div>`;
-            }
-            if (kind === "chapter") {
-              counters.chapter = openerNumber(front[2]) || counters.chapter + 1;
-              counters.fig = 0;
-            }
-            return `<div class="${kind === "chapter" ? "chapter-page" : "part-page"}"><p class="${kind === "chapter" ? "chapter-label" : "part-kicker"}">${escapeAttr(label)}</p><h${token.depth} id="${id}" class="${kind === "chapter" ? "chapter-title" : "part-title"}">${escapeAttr(plain)}</h${token.depth}></div>`;
-          }
-        const inner = Parser.parseInline(token.tokens, RENDER_OPTIONS);
-        const counterReset =
-          token.depth === 1 ? ' style="counter-reset: fig 0 section 0 subsection 0"' : "";
-        return `<h${token.depth} id="${id}"${counterReset}>${inner}</h${token.depth}>`;
-        },
-        blockquote(token: Tokens.Blockquote) {
-          const ad = admonitionOf(token.tokens[0]);
-          if (ad) {
-            const para = token.tokens[0] as Tokens.Paragraph;
-            const rest: Token[] = token.tokens.slice(1);
-            const keptInline = para.tokens.slice(ad.dropTokens);
-            if (keptInline.length > 0) {
-              rest.unshift({
-                ...para,
-                tokens: keptInline,
-              });
-            }
-            const content = Parser.parse(rest, RENDER_OPTIONS);
-            const icon = ADMONITION_ICONS[ad.kind] ?? "";
-            return `<div class="callout callout-${ad.kind}"><p class="callout-title"><span class="callout-icon" aria-hidden="true">${icon}</span>${ADMONITION_TITLES[ad.kind]}</p><div class="callout-content">${content}</div></div>`;
-          }
-          const content = Parser.parse(token.tokens, RENDER_OPTIONS);
-          return `<blockquote>${content}</blockquote>`;
-        },
-        hr(token: Tokens.Hr) {
-          return /^(_+|-{4,})\s*$/.test(token.raw.replace(/\n$/g, ""))
-            ? '<p class="md-write-line"></p>'
-            : "<hr>";
-        },
-      },
-    });
-    return (md: string): string => {
-      try {
-        // ::: therapeutic directives (tool / worksheet / diagram / reflection /
-        // summary / quote) expand into styled HTML before markdown parsing.
-        const expanded = processDirectives(md, {
-          parseInline: (text) =>
-            marked.parseInline(text, RENDER_OPTIONS) as string,
-        });
-        const rendered = marked.parse(expanded, { async: false }) as string;
-        if (!hasTocMarker(expanded)) return rendered;
-        const toc = buildTocHtml(rendered);
-        return rendered
-          .replace(/<p>\s*\[toc\]\s*<\/p>/gi, toc)
-          .replace(/<!--\s*toc\s*-->/gi, toc);
-      } catch {
-        return "";
-      }
-    };
-  }, [images, bookMode]);
+  // Markdown → HTML pipeline shared by the preview, the compiled book, every
+  // export and the headless API/CLI via lib/render-engine.ts.
+  const renderMarkdown = useMemo(
+    () => createMarkdownRenderer({ images }),
+    [images],
+  );
 
   const generatedHtml = useMemo(
     () => renderMarkdown(activeMarkdown),
@@ -998,6 +716,59 @@ export default function MarkdownConverter() {
     };
   }, [editorText]);
 
+  const qualityIssues = useMemo(() => {
+    const effectiveMarkdown =
+      sourceMode === "json"
+        ? jsonConversion.markdown
+        : bookMode
+          ? chapters
+              .map((ch, i) =>
+                ch.markdown.trim()
+                  ? ch.markdown
+                  : `# ${ch.title || `Chapter ${i + 1}`}`,
+              )
+              .join("\n\n")
+          : markdown;
+    return checkQuality(effectiveMarkdown, html);
+  }, [
+    sourceMode,
+    bookMode,
+    chapters,
+    markdown,
+    jsonConversion.markdown,
+    html,
+  ]);
+
+  useLayoutEffect(() => {
+    const paper = PAPER_SIZES.find((p) => p.id === paperMode);
+    const host = paperRef.current;
+    let raf = 0;
+    const measure = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (paperMode === "none" || !paper || !host) {
+          setPageBreaks([]);
+          return;
+        }
+        const pageHeightPx = toPx(paper.heightMm);
+        const article = host.querySelector<HTMLElement>(".markdown-body");
+        if (!article) return;
+        const total = article.scrollHeight;
+        const breaks: number[] = [];
+        for (let y = 0; y < total; y += pageHeightPx) breaks.push(y);
+        setPageBreaks(breaks);
+      });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (host) observer.observe(host);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paperMode, html, activeTemplate, themeOverrideCss]);
+
   const loadTemplate = useCallback(
     (id: string, force = false) => {
       if (id === activeTemplate && !force) return;
@@ -1018,6 +789,7 @@ export default function MarkdownConverter() {
   const importFiles = useCallback(
     async (files: FileList | File[]) => {
       const list = Array.from(files);
+      const zipFiles = list.filter((f) => /\.zip$/i.test(f.name));
       const mdFiles = list.filter((f) =>
         /\.(md|markdown|mdown)$/i.test(f.name),
       );
@@ -1027,9 +799,39 @@ export default function MarkdownConverter() {
       if (
         mdFiles.length === 0 &&
         imgFiles.length === 0 &&
-        jsonFiles.length === 0
+        jsonFiles.length === 0 &&
+        zipFiles.length === 0
       ) {
-        toast.warning("No Markdown, JSON or image files found.");
+        toast.warning("No Markdown, JSON, zip or image files found.");
+        return;
+      }
+
+      // Git-friendly book zip: book.json + chapters/*.md (+ images/).
+      if (zipFiles.length > 0) {
+        try {
+          const { book, images: zipImages } = await zipToBook(zipFiles[0]);
+          setMarkdown(book.chapters.map((c) => c.markdown).join("\n\n"));
+          setChapters(book.chapters);
+          setBookMode(book.bookMode || book.chapters.length > 1);
+          setActiveChapter(0);
+          setSourceMode("markdown");
+          setHtmlOverride(null);
+          setTab("preview");
+          if (book.templateId && getTemplate(book.templateId)) {
+            setActiveTemplate(book.templateId);
+          }
+          if (Object.keys(zipImages).length > 0) {
+            setImages((prev) => ({ ...prev, ...zipImages }));
+          }
+          toast.success(
+            `Imported book "${book.name}" — ${book.chapters.length} chapter(s)${Object.keys(zipImages).length > 0 ? ` and ${Object.keys(zipImages).length} image(s)` : ""}.`,
+          );
+        } catch (error) {
+          console.error("Zip import failed:", error);
+          toast.error(
+            error instanceof Error ? error.message : "Could not import the book zip.",
+          );
+        }
         return;
       }
 
@@ -1365,6 +1167,126 @@ export default function MarkdownConverter() {
     }
   }, [fullDocFor, html, isExportingPdf, activeMarkdown]);
 
+  const downloadMarkdown = useCallback(() => {
+    const template = getTemplate(activeTemplate);
+    const documentTitle =
+      titleFromMarkdown(activeMarkdown) ??
+      (bookMode ? "book" : null) ??
+      template?.label ??
+      "document";
+    const source = bookMode
+      ? chapters
+          .map((ch, i) => {
+            const md = ch.markdown.trim()
+              ? ch.markdown
+              : `# ${ch.title || `Chapter ${i + 1}`}`;
+            return `<!-- chapter: ${ch.title || `Chapter ${i + 1}`} -->\n\n${md}`;
+          })
+          .join("\n\n---\n\n")
+      : activeMarkdown;
+    const blob = new Blob([source], {
+      type: "text/markdown;charset=utf-8",
+    });
+    downloadBlob(blob, `${documentTitle}.md`);
+    toast.success(`Exported "${documentTitle}.md".`);
+  }, [activeMarkdown, activeTemplate, bookMode, chapters]);
+
+  // -- Git-friendly zip export (book.json + chapters/*.md + images/) ---------
+
+  const currentBookFile = useCallback((): BookFile => {
+    // currentProject is declared further down (Projects section); resolve it
+    // from the store here so this callback can live next to the exports.
+    const project = store.find((p) => p.id === activeProjectId) ?? null;
+    if (bookMode && chapters.length > 0) {
+      return {
+        name: project?.name ?? "My book",
+        templateId: activeTemplate,
+        presetId: project?.presetId ?? null,
+        bookMode: true,
+        chapters: chapters.map((ch) => ({ ...ch })),
+      };
+    }
+    return bookFromMarkdown(activeMarkdown, project?.name ?? "My book");
+  }, [store, activeProjectId, bookMode, chapters, activeTemplate, activeMarkdown]);
+
+  const downloadBookZip = useCallback(async () => {
+    if (isExportingZip) return;
+    setIsExportingZip(true);
+    try {
+      const book = currentBookFile();
+      const blob = await bookToZip(book, images);
+      const safe = book.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "book";
+      downloadBlob(blob, `${safe}-chapters.zip`);
+      toast.success(
+        `Exported "${safe}-chapters.zip" — ${book.chapters.length} chapter file(s). Commit it to git or build with book-author.`,
+      );
+    } catch (error) {
+      console.error("Zip export failed:", error);
+      toast.error("Zip export failed. Check the console for details.");
+    } finally {
+      setIsExportingZip(false);
+    }
+  }, [currentBookFile, images, isExportingZip]);
+
+
+  const [isExportingEpub, setIsExportingEpub] = useState(false);
+  const downloadEpub = useCallback(async () => {
+    if (isExportingEpub) return;
+    setIsExportingEpub(true);
+    try {
+      const template = getTemplate(activeTemplate);
+      const css = `${template?.style ?? ""}${themeOverrideCss}`;
+      const bodyHtml = bookMode ? compiledBookHtml : generatedHtml;
+      const documentTitle =
+        titleFromMarkdown(activeMarkdown) ??
+        (bookMode ? "my-book" : null) ??
+        template?.label ??
+        "document";
+      const epubChapters = bookMode
+        ? chapters
+            .map((ch, i) => ({
+              id: `chapter-${i + 1}-${ch.id.slice(-6)}`,
+              title: ch.title || `Chapter ${i + 1}`,
+              html: renderMarkdown(
+                ch.markdown.trim()
+                  ? ch.markdown
+                  : `# ${ch.title || `Chapter ${i + 1}`}\n\n`,
+              ),
+            }))
+            .filter((ch) => ch.html.trim() !== "")
+        : [
+            {
+              id: "chapter-1",
+              title: titleFromMarkdown(activeMarkdown) ?? documentTitle,
+              html: bodyHtml,
+            },
+          ];
+      const blob = await htmlToEpubBlob({
+        title: documentTitle,
+        chapters: epubChapters,
+        css,
+        description: template?.description ?? "",
+      });
+      downloadBlob(blob, `${documentTitle}.epub`);
+      toast.success(`Exported "${documentTitle}.epub".`);
+    } catch (error) {
+      console.error("EPUB export failed:", error);
+      toast.error("EPUB export failed. Check the console for details.");
+    } finally {
+      setIsExportingEpub(false);
+    }
+  }, [
+    isExportingEpub,
+    activeTemplate,
+    themeOverrideCss,
+    bookMode,
+    compiledBookHtml,
+    generatedHtml,
+    activeMarkdown,
+    chapters,
+    renderMarkdown,
+  ]);
+
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -1659,67 +1581,112 @@ export default function MarkdownConverter() {
         </div>
       )}
 
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b bg-background px-5 py-3">
-        <div className="flex items-center gap-2.5">
-          <h1 className="text-lg font-semibold tracking-tight">
-            Markdown / JSON → HTML
+      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-background px-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
+            <BookOpen className="size-4" />
+          </span>
+          <h1 className="text-sm font-semibold tracking-tight">
+            Kreator Studio v1
           </h1>
-          <Badge variant="secondary">prototype</Badge>
+          <div
+            className="ml-1 flex items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5"
+            role="group"
+            aria-label="Studio mode"
+          >
+            <button
+              type="button"
+              onClick={() => setStudioMode(false)}
+              aria-pressed={!studioMode}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+                !studioMode
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <FileText className="size-3.5" />
+              Book Editor
+            </button>
+            <button
+              type="button"
+              onClick={() => setStudioMode(true)}
+              aria-pressed={studioMode}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+                studioMode
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Clapperboard className="size-3.5" />
+              Video Editor
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-muted-foreground">
-              Template
-            </span>
-            <Select value={activeTemplate} onValueChange={loadTemplate}>
-              <SelectTrigger aria-label="Select a book template" className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TEMPLATES.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {bookMode && (
+            <Badge variant="secondary">book mode</Badge>
+          )}
+          <span className="hidden items-center gap-1.5 sm:flex">
+            <span
+              className={`size-1.5 rounded-full ${
+                autoSaved ? "bg-emerald-500" : "bg-amber-500"
+              }`}
+            />
+            {autoSaved ? "Autosaved" : "Editing"}
+          </span>
+        </div>
+      </header>
 
-          <Separator orientation="vertical" className="h-6" />
+      {!studioMode && (
+      <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b bg-muted/40 px-3">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            Template
+          </span>
+          <Select value={activeTemplate} onValueChange={loadTemplate}>
+            <SelectTrigger aria-label="Select a book template" className="h-8 w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TEMPLATES.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-          <Button
-            variant={bookMode ? "default" : "outline"}
-            onClick={toggleBookMode}
-            title="Multi-chapter mode: reorder chapters and compile the whole book"
-          >
+        <Separator orientation="vertical" className="h-5" />
+
+        <div className="flex items-center gap-1.5 rounded-lg border bg-background/50 p-0.5">
+          <Button size="sm" variant={bookMode ? "default" : "outline"} onClick={toggleBookMode} title="Multi-chapter mode: reorder chapters and compile the whole book">
             <BookOpen />
             Book
           </Button>
           {bookMode && (
             <>
-              <Button variant="outline" onClick={addChapter}>
+              <Button size="sm" variant="outline" onClick={addChapter}>
                 <Plus />
                 Chapter
               </Button>
-              <Button variant="secondary" onClick={compileBook}>
+              <Button size="sm" variant="secondary" onClick={compileBook}>
                 <FileText />
                 Compile book
               </Button>
             </>
           )}
-          <Button
-            variant={customizerOpen ? "default" : "outline"}
-            onClick={() => setCustomizerOpen((o) => !o)}
-            title="Customize accent color, fonts and line width live"
-          >
+          <Button size="sm" variant={customizerOpen ? "default" : "outline"} onClick={() => setCustomizerOpen((o) => !o)} title="Customize accent color, fonts and line width live">
             <Palette />
             Style
           </Button>
+        </div>
 
-          <Separator orientation="vertical" className="h-6" />
+        <Separator orientation="vertical" className="h-5" />
 
-          <Button variant="outline" asChild>
+        <div className="flex items-center gap-1.5 rounded-lg border bg-background/50 p-0.5">
+          <Button size="sm" variant="outline" asChild>
             <label>
               <ImagePlus />
               Add images
@@ -1737,7 +1704,7 @@ export default function MarkdownConverter() {
               />
             </label>
           </Button>
-          <Button variant="outline" asChild>
+          <Button size="sm" variant="outline" asChild>
             <label>
               <Folder />
               Import folder
@@ -1755,69 +1722,146 @@ export default function MarkdownConverter() {
               />
             </label>
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              if (sourceMode === "json") {
-                if (
-                  jsonText.trim() !== "" &&
-                  !window.confirm(
-                    "Loading the example will replace your current JSON. Continue?",
-                  )
-                ) {
-                  return;
-                }
-                setJsonText(JSON_EXAMPLE);
+          <Button size="sm" variant="outline" asChild>
+            <label>
+              <FolderUp />
+              Import .zip
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    void (async () => {
+                      try {
+                        const { book, images: zipImages } = await zipToBook(file);
+                        setChapters(book.chapters);
+                        setBookMode(book.bookMode || book.chapters.length > 1);
+                        setActiveChapter(0);
+                        setSourceMode("markdown");
+                        setHtmlOverride(null);
+                        setMarkdown(book.chapters.map((c) => c.markdown).join("\n\n"));
+                        setTab("preview");
+                        if (book.templateId && getTemplate(book.templateId)) {
+                          setActiveTemplate(book.templateId);
+                        }
+                        if (Object.keys(zipImages).length > 0) {
+                          setImages((prev) => ({ ...prev, ...zipImages }));
+                        }
+                        toast.success(
+                          `Imported book "${book.name}" — ${book.chapters.length} chapter(s).`,
+                        );
+                      } catch (error) {
+                        console.error("Zip import failed:", error);
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : "Could not import the book zip.",
+                        );
+                      }
+                    })();
+                  }
+                  e.target.value = "";
+                }}
+                className="hidden"
+              />
+            </label>
+          </Button>
+        </div>
+
+        <Separator orientation="vertical" className="h-5" />
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="default" title="Export the book">
+              {isExportingDocx || isExportingPdf || isExportingEpub || isExportingZip ? (
+                <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Download />
+              )}
+              Export
+              <ChevronDown className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={downloadDocx} disabled={isExportingDocx}>
+              <Download />
+              DOCX
+              {isExportingDocx && <span className="ml-auto text-xs text-muted-foreground">Exporting…</span>}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={downloadPdf} disabled={isExportingPdf}>
+              <FileText />
+              PDF
+              {isExportingPdf && <span className="ml-auto text-xs text-muted-foreground">Printing…</span>}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={downloadEpub} disabled={isExportingEpub}>
+              <BookMarked />
+              EPUB
+              {isExportingEpub && <span className="ml-auto text-xs text-muted-foreground">Exporting…</span>}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={downloadMarkdown}>
+              <FileDown />
+              Markdown
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={downloadHtml}>
+              <FileCode2 />
+              HTML
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={downloadBookZip} disabled={isExportingZip}>
+              <FolderDown />
+              Chapters .zip
+              {isExportingZip && <span className="ml-auto text-xs text-muted-foreground">Zipping…</span>}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={copyHtml}>
+              <Copy />
+              {copied ? "Copied!" : "Copy HTML"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Separator orientation="vertical" className="h-5" />
+
+        <div className="flex items-center gap-1.5 rounded-lg border bg-background/50 p-0.5">
+          <Button size="sm" variant="outline" onClick={() => {
+            if (sourceMode === "json") {
+              if (
+                jsonText.trim() !== "" &&
+                !window.confirm(
+                  "Loading the example will replace your current JSON. Continue?",
+                )
+              ) {
                 return;
               }
-              loadTemplateExample();
-            }}
-          >
+              setJsonText(JSON_EXAMPLE);
+              return;
+            }
+            loadTemplateExample();
+          }}>
             <FilePlus />
             Example
           </Button>
-          <Button variant="ghost" onClick={clearEditor}>
+          <Button size="sm" variant="ghost" onClick={clearEditor}>
             <Trash2 />
             Clear
           </Button>
-          <Button variant="secondary" onClick={copyHtml}>
-            <Copy />
-            {copied ? "Copied!" : "Copy HTML"}
-          </Button>
-          <Button variant="outline" onClick={downloadHtml}>
-            <FileCode2 />
-            Download .html
-          </Button>
-          <Button onClick={downloadDocx} disabled={isExportingDocx}>
-            {isExportingDocx ? (
-              <span className="inline-flex items-center gap-1.5">
-                <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                Exporting…
-              </span>
-            ) : (
-              <>
-                <Download />
-                Download .docx
-              </>
-            )}
-          </Button>
-          <Button variant="outline" onClick={downloadPdf} disabled={isExportingPdf}>
-            {isExportingPdf ? (
-              <span className="inline-flex items-center gap-1.5">
-                <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                Printing…
-              </span>
-            ) : (
-              <>
-                <FileText />
-                Download PDF
-              </>
-            )}
-          </Button>
         </div>
-      </header>
+      </div>
+      )}
 
-      <div className="grid flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-2">
+      {studioMode ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <VideoStudio
+            bookTitle={currentProject?.name ?? "Untitled book"}
+            chapters={chapters}
+            sourceMarkdown={
+              bookMode ? chapters.map((c) => c.markdown).join("\n\n") : markdown
+            }
+            images={images}
+          />
+        </div>
+      ) : (
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-2">
         <section className="flex min-h-0 flex-row border-b lg:border-b-0 lg:border-r">
           <nav
             className="flex w-10 shrink-0 flex-col items-center gap-1 border-r bg-muted/40 py-2"
@@ -1829,7 +1873,8 @@ export default function MarkdownConverter() {
               { id: "blocks", icon: Blocks, label: "Blocks" },
               { id: "revisions", icon: History, label: "Revisions", count: currentProject?.revisions.length },
               { id: "notes", icon: MessageSquarePlus, label: "Notes", count: currentProject?.comments.filter((c) => !c.resolved).length },
-            ].map(({ id, icon: RailIcon, label, count }) => (
+              { id: "quality", icon: ShieldAlert, label: "Quality", count: qualityIssues.length, isQuality: true },
+            ].map(({ id, icon: RailIcon, label, count, isQuality }) => (
               <button
                 key={id}
                 type="button"
@@ -1845,7 +1890,13 @@ export default function MarkdownConverter() {
                 <RailIcon className="size-4" />
                 {label}
                 {typeof count === "number" && count > 0 && (
-                  <span className="absolute top-1 right-2 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-semibold text-white">
+                  <span
+                    className={`absolute top-1 right-2 flex size-4 items-center justify-center rounded-full text-[9px] font-semibold text-white ${
+                      isQuality === true && qualityIssues.some((i) => i.severity === "error")
+                        ? "bg-red-600"
+                        : "bg-amber-500"
+                    }`}
+                  >
                     {count}
                   </span>
                 )}
@@ -1906,6 +1957,23 @@ export default function MarkdownConverter() {
                     onClose={() => setPanel(null)}
                   />
                 )}
+              {panel === "quality" && (
+                <QualityPanel
+                  issues={qualityIssues}
+                  text={editorText}
+                  onApplyReplacement={(offset, length, replacement) => {
+                    const next = editorText;
+                    const updated =
+                      next.slice(0, offset) +
+                      replacement +
+                      next.slice(offset + length);
+                    if (sourceMode === "json") setJsonText(updated);
+                    else if (bookMode) updateBookEditor(updated);
+                    else setMarkdown(updated);
+                  }}
+                  onClose={() => setPanel(null)}
+                />
+              )}
             </aside>
           )}
           <div className="flex min-h-0 flex-1 flex-col">
@@ -2133,6 +2201,41 @@ export default function MarkdownConverter() {
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Style
+                  </span>
+                  <div className="flex items-center gap-1" role="group" aria-label="Style preset">
+                    {STYLE_PRESETS.map((preset) => {
+                      const active =
+                        custom.accent === preset.custom.accent &&
+                        custom.font === preset.custom.font &&
+                        custom.width === preset.custom.width;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setCustom(preset.custom)}
+                          aria-pressed={active}
+                          title={`${preset.label} — accent ${preset.custom.accent ?? "default"}, ${preset.custom.font} font, ${preset.custom.width} width`}
+                          className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+                            active
+                              ? "border-ring bg-background text-foreground shadow-sm"
+                              : "border-border bg-background/50 text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          <span
+                            className="size-2.5 rounded-full border border-black/10"
+                            style={{
+                              background: preset.swatch,
+                            }}
+                          />
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Accent
                   </span>
                   <div className="flex items-center gap-1">
@@ -2254,7 +2357,7 @@ export default function MarkdownConverter() {
             onValueChange={(v) => setTab(v as "preview" | "html")}
             className="flex min-h-0 flex-1 flex-col"
           >
-            <div className="flex items-center border-b bg-muted/50 px-3 py-1.5">
+            <div className="flex items-center gap-2 border-b bg-muted/50 px-3 py-1.5">
               <TabsList className="h-7">
                 <TabsTrigger value="preview">
                   <Eye />
@@ -2265,6 +2368,33 @@ export default function MarkdownConverter() {
                   HTML
                 </TabsTrigger>
               </TabsList>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <FileText className="size-3.5" />
+                <Select
+                  value={paperMode}
+                  onValueChange={(v) => setPaperMode(v)}
+                >
+                  <SelectTrigger
+                    aria-label="Page size"
+                    className="h-6 w-36 gap-1 px-2 text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAPER_SIZES.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {paperMode !== "none" && pageBreaks.length > 0 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    ≈{pageBreaks.length} page
+                    {pageBreaks.length > 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
               {isHtmlOverride && (
                 <Button
                   variant="outline"
@@ -2283,11 +2413,55 @@ export default function MarkdownConverter() {
             >
               <style>
                 {(getTemplate(activeTemplate)?.style ?? "") + themeOverrideCss}
+                {paperMode !== "none" &&
+                  `
+            .paper-preview .${PAGE_BREAK_CSS.replace(/,\s*/g, ", .paper-preview ")} {
+              break-before: page;
+            }
+            .paper-preview::before {
+              content: attr(data-page-label);
+            }
+          `}
               </style>
-              <article
-                className={`markdown-body theme-${activeTemplate}`}
-                dangerouslySetInnerHTML={{ __html: html }}
-              />
+              <div
+                ref={paperRef}
+                className={
+                  paperMode !== "none"
+                    ? "paper-preview relative mx-auto px-2 py-4 transition-[max-width]"
+                    : ""
+                }
+                style={
+                  paperMode !== "none"
+                    ? {
+                        maxWidth: toPx(
+                          PAPER_SIZES.find((p) => p.id === paperMode)
+                            ?.widthMm ?? 0,
+                        ),
+                      }
+                    : undefined
+                }
+              >
+                <article
+                  className={`markdown-body theme-${activeTemplate}`}
+                  dangerouslySetInnerHTML={{ __html: html }}
+                />
+                {paperMode !== "none" && (
+                  <div className="pointer-events-none absolute top-0 right-0 bottom-0 left-0">
+                    {pageBreaks.slice(1).map((y, index) => (
+                      <div
+                        key={`${y}-${index}`}
+                        className="absolute left-0 flex w-full items-center gap-1 text-[10px] font-semibold text-sky-600 dark:text-sky-400"
+                        style={{ top: y - 1 }}
+                      >
+                        <span className="rounded bg-sky-500/10 px-1 py-px">
+                          Page {index + 2}
+                        </span>
+                        <span className="h-px flex-1 border-b border-dashed border-sky-500/40" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </TabsContent>
             <TabsContent
               value="html"
@@ -2318,6 +2492,7 @@ export default function MarkdownConverter() {
           </Tabs>
         </section>
       </div>
+      )}
     </div>
   );
 }

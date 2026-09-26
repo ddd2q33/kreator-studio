@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Markdown → HTML",
-  description: "Convert Markdown to HTML in real time",
+  title: "Kreator Studio v1",
+  description: "Forge your story: Markdown to HTML, DOCX, PDF, EPUB and chapter promo videos in one studio",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -26,7 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="flex h-full flex-col overflow-hidden">
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

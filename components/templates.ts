@@ -1309,6 +1309,7 @@ const THEME_TECHNICAL = `
   .markdown-body h1:not(:first-child),
   .markdown-body .copyright-page,
   .markdown-body .dedication,
+  .markdown-body .restricted,
   .markdown-body .toc { break-before: page; }
   .markdown-body p, .markdown-body li { orphans: 3; widows: 3; }
 }
@@ -1755,6 +1756,7 @@ const THEME_CYBERSEC = `
   .markdown-body h1:not(:first-child),
   .markdown-body .copyright-page,
   .markdown-body .dedication,
+  .markdown-body .restricted,
   .markdown-body .toc { break-before: page; }
   .markdown-body p, .markdown-body li { orphans: 3; widows: 3; }
 }

@@ -1,6 +1,7 @@
 import type { IStylesOptions } from "docx";
 import {
   AlignmentType,
+  Bookmark,
   BorderStyle,
   Document,
   ExternalHyperlink,
@@ -8,13 +9,16 @@ import {
   Header,
   HeadingLevel,
   ImageRun,
+  InternalHyperlink,
   LevelFormat,
   Packer,
   PageNumber,
   Paragraph,
   ShadingType,
+  SimpleField,
   Table,
   TableCell,
+  TableOfContents,
   TableRow,
   TextRun,
   WidthType,
@@ -23,8 +27,8 @@ import { parseFragment } from "parse5";
 
 export type ExportImages = Record<string, string>;
 
-type InlineRun = TextRun | ExternalHyperlink;
-type BlockElement = Paragraph | Table;
+type InlineRun = TextRun | ExternalHyperlink | InternalHyperlink;
+type BlockElement = Paragraph | Table | TableOfContents;
 
 /** Run-level formatting accumulated while descending inline DOM nodes. */
 type RunStyle = {
@@ -333,8 +337,22 @@ function trimmedTextOf(node: HtmlNode | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
-// Image helpers (browser-only rasterization)
+// Image helpers (pluggable resolver: browser canvas vs. server/CLI bytes)
 // ---------------------------------------------------------------------------
+
+export type ResolvedDocxImage = {
+  dataUrl: string;
+  width: number;
+  height: number;
+  mime: "image/png" | "image/jpeg";
+};
+
+/**
+ * Turns an arbitrary <img> src (data:, http(s):, blob:) into an embeddable
+ * data URL plus pixel dimensions. The browser default rasterizes through
+ * canvas; server code injects its own resolver (see lib/docx-node.ts).
+ */
+export type DocxImageResolver = (src: string) => Promise<ResolvedDocxImage | null>;
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -387,6 +405,15 @@ async function toPngWithSize(dataUrl: string): Promise<{
   } catch {
     return null;
   }
+}
+
+/** Browser default: fetch to data URL, then rasterize to PNG via canvas. */
+async function browserResolveImage(src: string): Promise<ResolvedDocxImage | null> {
+  const dataUrl = await sourceToDataUrl(src);
+  if (!dataUrl) return null;
+  const sized = await toPngWithSize(dataUrl);
+  if (!sized) return null;
+  return { ...sized, mime: "image/png" };
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +486,10 @@ function collectInline(
         const inner = collectInline(child, { ...style, link: true }, config);
         if (/^https?:|^mailto:/i.test(href)) {
           out.push(new ExternalHyperlink({ children: inner, link: href }));
+        } else if (href.startsWith("#")) {
+          out.push(
+            new InternalHyperlink({ children: inner, anchor: href.slice(1) }),
+          );
         } else {
           out.push(...inner);
         }
@@ -600,14 +631,19 @@ export function suggestedFilename(markdown: string): string {
 
 /**
  * Convert the rendered document HTML (the same string shown in the preview and
- * used for the .html download) into a .docx Blob, mirroring the preview's look:
- * title page, front matter, table of contents, part/chapter pages, callouts,
- * code frames, tables, images and page-numbered footers.
+ * used for the .html download) into a docx Document, mirroring the preview's
+ * look: title page, front matter, table of contents, part/chapter pages,
+ * callouts, code frames, tables, images and page-numbered footers.
+ *
+ * Isomorphic entry point: pass `resolveImage` to embed images without a DOM
+ * (headless API routes, the book-author CLI — see lib/docx-node.ts).
  */
-export async function htmlToDocxBlob(
+export async function buildDocxDocument(
   html: string,
   templateId?: string,
-): Promise<Blob> {
+  options: { resolveImage?: DocxImageResolver } = {},
+): Promise<Document> {
+  const resolve = options.resolveImage ?? browserResolveImage;
   const config = configFor(templateId);
   const nodes = parseHtml(html);
 
@@ -789,9 +825,7 @@ export async function htmlToDocxBlob(
   ): Promise<BlockElement[]> {
     const src = element.attrs.src ?? "";
     const alt = element.attrs.alt ?? "";
-    const dataUrl = await sourceToDataUrl(src);
-    if (!dataUrl) return [];
-    const sized = await toPngWithSize(dataUrl);
+    const sized = await resolve(src);
     if (!sized) return [];
     const displayWidth = Math.min(sized.width, CONTENT_MAX_WIDTH_PX);
     const displayHeight = Math.max(
@@ -800,7 +834,7 @@ export async function htmlToDocxBlob(
     );
     const run = new ImageRun({
       data: sized.dataUrl,
-      type: "png",
+      type: sized.mime === "image/jpeg" ? "jpg" : "png",
       transformation: { width: displayWidth, height: displayHeight },
       altText: {
         title: alt || "image",
@@ -827,50 +861,52 @@ export async function htmlToDocxBlob(
     const blocks: BlockElement[] = [];
     if (img) {
       const src = img.attrs.src ?? "";
-      const dataUrl = await sourceToDataUrl(src);
-      if (dataUrl) {
-        const sized = await toPngWithSize(dataUrl);
-        if (sized) {
-          const displayWidth = Math.min(sized.width, CONTENT_MAX_WIDTH_PX);
-          const displayHeight = Math.max(
-            1,
-            Math.round((displayWidth * sized.height) / Math.max(1, sized.width)),
-          );
+      const sized = await resolve(src);
+      if (sized) {
+        const displayWidth = Math.min(sized.width, CONTENT_MAX_WIDTH_PX);
+        const displayHeight = Math.max(
+          1,
+          Math.round((displayWidth * sized.height) / Math.max(1, sized.width)),
+        );
+        blocks.push(
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 200, after: 40 },
+            children: [
+              new ImageRun({
+                data: sized.dataUrl,
+                type: sized.mime === "image/jpeg" ? "jpg" : "png",
+                transformation: { width: displayWidth, height: displayHeight },
+                altText: { description: img.attrs.alt ?? "", name: img.attrs.alt ?? "" },
+              }),
+            ],
+          }),
+        );
+        if (captionEl && isElement(captionEl)) {
+          let captionText = trimmedTextOf(captionEl);
+          // Technical template: auto-numbered captions "Figure N.M — …".
+          if (config.headingNumbered === true) {
+            headingCounters.fig += 1;
+            captionText = `Figure ${headingCounters.chapter}.${headingCounters.fig}. — ${captionText}`;
+          }
           blocks.push(
             new Paragraph({
               alignment: AlignmentType.CENTER,
-              spacing: { before: 200, after: 40 },
+              spacing: { before: 40, after: 200 },
               children: [
-                new ImageRun({
-                  data: sized.dataUrl,
-                  type: "png",
-                  transformation: { width: displayWidth, height: displayHeight },
-                  altText: { description: img.attrs.alt ?? "", name: img.attrs.alt ?? "" },
+                new Bookmark({
+                  id: `figure-${headingCounters.chapter}-${headingCounters.fig}`,
+                  children: [
+                    new TextRun({
+                      text: captionText,
+                      size: 17,
+                      color: config.gray,
+                    }),
+                  ],
                 }),
               ],
             }),
           );
-          if (captionEl && isElement(captionEl)) {
-            let captionText = trimmedTextOf(captionEl);
-            // Technical template: auto-numbered captions "Figure N.M — …".
-            if (config.headingNumbered === true) {
-              headingCounters.fig += 1;
-              captionText = `Figure ${headingCounters.chapter}.${headingCounters.fig}. — ${captionText}`;
-            }
-            blocks.push(
-              new Paragraph({
-                alignment: AlignmentType.CENTER,
-                spacing: { before: 40, after: 200 },
-                children: [
-                  new TextRun({
-                    text: captionText,
-                    size: 17,
-                    color: config.gray,
-                  }),
-                ],
-              }),
-            );
-          }
         }
       }
     }
@@ -1041,25 +1077,9 @@ const langEl = firstClass(element.children, "code-lang");
 
   // -- Table of contents ----------------------------------------------------
 
-  function tocBlock(element: ElementNode): BlockElement {
-    const paragraphs: Paragraph[] = [];
-    paragraphs.push(
-      new Paragraph({
-        spacing: { after: 160 },
-        border: { bottom: thinBorder(config.accent) },
-        children: [
-          new TextRun({
-            text: trimmedTextOf(firstClass(element.children, "toc-title")) ||
-              "Contents",
-            bold: true,
-            color: config.ink,
-            size: 26,
-            font: config.serif,
-          }),
-        ],
-      }),
-    );
-    const entries: { level: number; num: string; text: string }[] = [];
+  function tocBlock(element: ElementNode): BlockElement[] {
+    const entries: { level: number; num: string; text: string; id: string }[] =
+      [];
     const collect = (list: HtmlNode[]): void => {
       for (const node of list) {
         if (!isElement(node)) continue;
@@ -1068,18 +1088,26 @@ const langEl = firstClass(element.children, "code-lang");
             node.attrs.class ?? "",
           );
           if (levelMatch) {
-            const level = Number(levelMatch[1]);
-            const numEl = node.children.find(
-              (c): c is ElementNode => isElement(c) && hasClass(c, "toc-num"),
+            const anchorEl = node.children.find(
+              (c): c is ElementNode => isElement(c) && c.tag === "a",
             );
-            const textEl = node.children.find(
-              (c): c is ElementNode =>
-                isElement(c) && (hasClass(c, "toc-text") || c.tag === "a"),
-            );
+            const href = anchorEl?.attrs.href ?? "";
+            const id = href.startsWith("#") ? href.slice(1) : "";
             entries.push({
-              level,
-              num: numEl ? trimmedTextOf(numEl) : "",
-              text: textEl ? trimmedTextOf(textEl) : "",
+              level: Number(levelMatch[1]),
+              num: trimmedTextOf(
+                node.children.find(
+                  (c): c is ElementNode =>
+                    isElement(c) && hasClass(c, "toc-num"),
+                ),
+              ),
+              text: trimmedTextOf(
+                node.children.find(
+                  (c): c is ElementNode =>
+                    isElement(c) && hasClass(c, "toc-text"),
+                ),
+              ),
+              id,
             });
           }
         }
@@ -1087,55 +1115,34 @@ const langEl = firstClass(element.children, "code-lang");
       }
     };
     collect(element.children);
-    for (const entry of entries) {
-      const runs: InlineRun[] = [];
-      if (entry.num) {
-        runs.push(
-          new TextRun({
-            text: `${entry.num}`,
-            bold: true,
-            color: config.accent,
-            size: 21,
-          }),
-        );
-        runs.push(new TextRun({ text: "\t", size: 21 }));
-      }
-      if (entry.text) {
-        runs.push(
-          new TextRun({
-            text: entry.text,
-            size: 21,
-            bold: entry.level === 2,
-            color: config.ink,
-            ...(entry.level === 1
-              ? { allCaps: true, size: 18, characterSpacing: 18 }
-              : {}),
-          }),
-        );
-      }
-      paragraphs.push(
-        new Paragraph({
-          spacing: {
-            after: 80,
-            line: 280,
-            before: entry.level === 1 ? 120 : (entry.level === 2 ? 20 : 0),
-          },
-          indent: {
-            left: entry.level >= 3 ? (entry.level - 2) * 340 : 0,
-          },
-          children: runs,
+    const cachedEntries = entries.map((entry) => ({
+      title: `${entry.num ? `${entry.num}\t` : ""}${entry.text}`,
+      level: entry.level,
+      ...(entry.id ? { href: entry.id } : {}),
+    }));
+    const titleText =
+      trimmedTextOf(firstClass(element.children, "toc-title")) || "Contents";
+    const titleParagraph = new Paragraph({
+      spacing: { after: 160 },
+      border: { bottom: thinBorder(config.accent) },
+      children: [
+        new TextRun({
+          text: titleText,
+          bold: true,
+          color: config.ink,
+          size: 26,
+          font: config.serif,
         }),
-      );
-    }
-    return singleCellTable(paragraphs, config, {
-      fill: config.soft,
-      borders: {
-        top: thinBorder(config.border),
-        bottom: thinBorder(config.border),
-        left: thinBorder(config.border),
-        right: thinBorder(config.border),
-      },
+      ],
     });
+    return [
+      titleParagraph,
+      new TableOfContents("Contents", {
+        cachedEntries,
+        hyperlink: true,
+        headingStyleRange: "1-3",
+      }),
+    ];
   }
 
   // -- Therapeutic directive components (tool / worksheet / reflection /
@@ -1511,6 +1518,7 @@ const langEl = firstClass(element.children, "code-lang");
     kicker: string,
     title: string,
     kind: "part" | "chapter",
+    anchorId?: string,
   ): BlockElement[] {
     const isChapter = kind === "chapter";
     // Hierarchical numbering starts (or restarts) at every opener page.
@@ -1559,15 +1567,30 @@ const langEl = firstClass(element.children, "code-lang");
         heading: isChapter ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_1,
         alignment: AlignmentType.CENTER,
         spacing: { before: 260, after: 0, line: 320 },
-        children: [
-          new TextRun({
-            text: title,
-            font: config.headingSerif ? config.serif : config.sans,
-            size: isChapter ? 47 : 56,
-            bold: true,
-            color: config.ink,
-          }),
-        ],
+        children: anchorId
+          ? [
+              new Bookmark({
+                id: anchorId,
+                children: [
+                  new TextRun({
+                    text: title,
+                    font: config.headingSerif ? config.serif : config.sans,
+                    size: isChapter ? 47 : 56,
+                    bold: true,
+                    color: config.ink,
+                  }),
+                ],
+              }),
+            ]
+          : [
+              new TextRun({
+                text: title,
+                font: config.headingSerif ? config.serif : config.sans,
+                size: isChapter ? 47 : 56,
+                bold: true,
+                color: config.ink,
+              }),
+            ],
       }),
     );
     // The monospace `//` ornament used by programming templates is no longer
@@ -1640,6 +1663,57 @@ const langEl = firstClass(element.children, "code-lang");
         }),
       ],
     });
+  }
+
+  function restrictedBlock(element: ElementNode): BlockElement {
+    const text = textOf(element)
+      .split(/\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" ");
+    const labelRuns: InlineRun[] = [
+      new TextRun({
+        text: "  Restricted  ",
+        font: config.mono,
+        bold: true,
+        color: config.accent,
+        size: 16,
+        characterSpacing: 52,
+        allCaps: true,
+        border: {
+          style: BorderStyle.SINGLE,
+          size: 7,
+          color: config.border,
+          space: 6,
+        },
+      }),
+    ];
+    return singleCellTable(
+      [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 0, after: 120, line: 260 },
+          children: labelRuns,
+        }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 0, after: 0, line: 340 },
+          children: [
+            new TextRun({ text, size: 17, color: config.gray, italics: true }),
+          ],
+        }),
+      ],
+      config,
+      {
+        fill: config.codeBg,
+        borders: {
+          top: thinBorder(config.border),
+          bottom: thinBorder(config.border),
+          left: thinBorder(config.border),
+          right: thinBorder(config.border),
+        },
+      },
+    );
   }
 
   // -- Paragraph ------------------------------------------------------------
@@ -1747,6 +1821,15 @@ const langEl = firstClass(element.children, "code-lang");
       }
 
       firstAfterTitle = false;
+      const headingAnchor = node.attrs.id;
+      const headingRuns: InlineRun[] = [
+        new TextRun({
+          text: headingText,
+          size: HEADING_SIZES[depth] ?? 24,
+          font: config.headingSerif ? config.serif : config.sans,
+          color: config.ink,
+        }),
+      ];
       body.push(
         new Paragraph({
           heading:
@@ -1758,14 +1841,9 @@ const langEl = firstClass(element.children, "code-lang");
             before: depth === 1 ? 0 : 320,
             after: 200,
           },
-          children: [
-            new TextRun({
-              text: headingText,
-              size: HEADING_SIZES[depth] ?? 24,
-              font: config.headingSerif ? config.serif : config.sans,
-              color: config.ink,
-            }),
-          ],
+          children: headingAnchor
+            ? [new Bookmark({ id: headingAnchor, children: headingRuns })]
+            : headingRuns,
         }),
       );
       return;
@@ -1857,7 +1935,12 @@ const langEl = firstClass(element.children, "code-lang");
             );
           }
           body.push(
-            ...partOrChapterPage(kicker, title, isChapter ? "chapter" : "part"),
+            ...partOrChapterPage(
+              kicker,
+              title,
+              isChapter ? "chapter" : "part",
+              node.attrs.id,
+            ),
           );
           return;
         }
@@ -1873,6 +1956,10 @@ const langEl = firstClass(element.children, "code-lang");
           body.push(dedicationBlock(node));
           return;
         }
+        if (has("restricted") || has("restricted-notice")) {
+          body.push(restrictedBlock(node));
+          return;
+        }
         if (has("callout")) {
           body.push(calloutBlock(node));
           body.push(new Paragraph({ spacing: { after: 100 }, children: [] }));
@@ -1884,7 +1971,7 @@ const langEl = firstClass(element.children, "code-lang");
           return;
         }
         if (has("toc")) {
-          body.push(tocBlock(node));
+          body.push(...tocBlock(node));
           body.push(new Paragraph({ spacing: { after: 100 }, children: [] }));
           return;
         }
@@ -2019,6 +2106,61 @@ const langEl = firstClass(element.children, "code-lang");
         },
         paragraph: { spacing: { before: 240, after: 100, line: 300 } },
       },
+      {
+        id: "Heading5",
+        name: "Heading 5",
+        next: "Normal",
+        quickFormat: true,
+        basedOn: "Normal",
+        run: {
+          font: config.headingSerif ? config.serif : config.sans,
+          size: 24,
+          bold: true,
+          color: config.ink,
+        },
+        paragraph: { spacing: { before: 220, after: 90, line: 300 } },
+      },
+      {
+        id: "Heading6",
+        name: "Heading 6",
+        next: "Normal",
+        quickFormat: true,
+        basedOn: "Normal",
+        run: {
+          font: config.headingSerif ? config.serif : config.sans,
+          size: 24,
+          bold: true,
+          italics: true,
+          color: config.ink,
+        },
+        paragraph: { spacing: { before: 200, after: 90, line: 300 } },
+      },
+      {
+        id: "Caption",
+        name: "Caption",
+        next: "Normal",
+        quickFormat: true,
+        basedOn: "Normal",
+        run: {
+          size: 17,
+          color: config.gray,
+          italics: true,
+        },
+        paragraph: { spacing: { before: 40, after: 200 } },
+      },
+      {
+        id: "Quote",
+        name: "Quote",
+        next: "Normal",
+        quickFormat: true,
+        basedOn: "Normal",
+        run: {
+          size: config.bodySize ?? 26,
+          color: config.gray,
+          italics: config.quoteItalic ?? true,
+        },
+        paragraph: { spacing: { before: 160, after: 160, line: 300 } },
+      },
     ],
   });
 
@@ -2030,7 +2172,28 @@ const langEl = firstClass(element.children, "code-lang");
         alignment: AlignmentType.CENTER,
         children: [
           new TextRun({
+            text: `${bookTitle.toUpperCase()}\t`,
+            size: 16,
+            color: config.gray,
+            characterSpacing: 20,
+          }),
+          new TextRun({
+            text: "Page ",
+            size: 18,
+            color: config.gray,
+          }),
+          new TextRun({
             children: [PageNumber.CURRENT],
+            size: 18,
+            color: config.gray,
+          }),
+          new TextRun({
+            text: " of ",
+            size: 18,
+            color: config.gray,
+          }),
+          new TextRun({
+            children: [PageNumber.TOTAL_PAGES],
             size: 18,
             color: config.gray,
           }),
@@ -2040,10 +2203,11 @@ const langEl = firstClass(element.children, "code-lang");
   });
 
   const doc = new Document({
-    creator: "Markdown → HTML Converter",
+    creator: "book-studio",
     title: bookTitle,
     numbering: { config: configs },
     styles: headStyles(),
+    features: { updateFields: true },
     sections: [
       {
         properties: {
@@ -2060,11 +2224,26 @@ const langEl = firstClass(element.children, "code-lang");
                     new Paragraph({
                       alignment: AlignmentType.CENTER,
                       children: [
+                        // Reusable live header: Word re-runs the STYLEREF field
+                        // so the current chapter title appears on every page.
+                        new SimpleField(
+                          ` STYLEREF "Heading 2" `,
+                          bookTitle.toUpperCase(),
+                        ),
+                      ],
+                    }),
+                  ],
+                }),
+                first: new Header({
+                  children: [
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      children: [
                         new TextRun({
                           text: bookTitle.toUpperCase(),
-                          size: 15,
+                          size: 16,
                           color: "9CA3AF",
-                          characterSpacing: 24,
+                          characterSpacing: 20,
                         }),
                       ],
                     }),
@@ -2074,12 +2253,39 @@ const langEl = firstClass(element.children, "code-lang");
             : undefined,
         footers: {
           default: footerDefault,
+          first: new Footer({
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                  new TextRun({
+                    text: "·",
+                    size: 18,
+                    color: config.gray,
+                  }),
+                ],
+              }),
+            ],
+          }),
         },
         children: body,
       },
     ],
   });
 
+  return doc;
+}
+
+/**
+ * Browser entry point: renders the HTML to a .docx Blob (downloads come from
+ * the DOM). Server code should call buildDocxDocument with its own image
+ * resolver and pack with Packer.toBuffer instead (see lib/docx-node.ts).
+ */
+export async function htmlToDocxBlob(
+  html: string,
+  templateId?: string,
+): Promise<Blob> {
+  const doc = await buildDocxDocument(html, templateId);
   return Packer.toBlob(doc);
 }
 
