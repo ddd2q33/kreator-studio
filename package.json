@@ -17,6 +17,7 @@
     "book:watch": "node trauma-book-template/watch.mjs"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.69.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.3.0",
     "docx": "^9.7.1",

@@ -31,7 +31,6 @@ import {
   BookOpen,
   ChevronDown,
   ChevronUp,
-  Clapperboard,
   Code2,
   Copy,
   Download,
@@ -85,7 +84,7 @@ import {
   type ProjectRevision,
 } from "@/lib/projects";
 import { MarkdownToolbar, applyMarkdown } from "@/components/editor/writer-toolbar";
-import { VideoStudio } from "@/components/editor/video-studio";
+import { StudioHeader } from "@/components/studio-header";
 import { ProjectManager } from "@/components/editor/project-manager";
 import { PresetsPanel } from "@/components/editor/presets-panel";
 import { BlocksPanel } from "@/components/editor/blocks-panel";
@@ -424,7 +423,6 @@ export default function MarkdownConverter() {
     | "outline"
     | null
   >(null);
-  const [studioMode, setStudioMode] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
   const [editorSplit, setEditorSplit] = useState(50);
@@ -1715,49 +1713,9 @@ export default function MarkdownConverter() {
         </div>
       )}
 
-      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-background px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
-            <BookOpen className="size-4" />
-          </span>
-          <h1 className="text-sm font-semibold tracking-tight">
-            Kreator Studio v1
-          </h1>
-          <div
-            className="ml-1 flex items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5"
-            role="group"
-            aria-label="Studio mode"
-          >
-            <button
-              type="button"
-              onClick={() => setStudioMode(false)}
-              aria-pressed={!studioMode}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-                !studioMode
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <FileText className="size-3.5" />
-              Manuscript Editor
-            </button>
-            <button
-              type="button"
-              onClick={() => setStudioMode(true)}
-              aria-pressed={studioMode}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-                studioMode
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Clapperboard className="size-3.5" />
-              Video Editor
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <StudioHeader
+        right={
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {bookMode && (
             <Badge variant="secondary">book mode</Badge>
           )}
@@ -1770,9 +1728,9 @@ export default function MarkdownConverter() {
             {autoSaved ? "Autosaved" : "Editing"}
           </span>
         </div>
-      </header>
+        }
+      />
 
-      {!studioMode && (
       <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b bg-muted/40 px-3">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-medium text-muted-foreground">
@@ -1976,20 +1934,7 @@ export default function MarkdownConverter() {
           </Button>
         </div>
       </div>
-      )}
 
-      {studioMode ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <VideoStudio
-            bookTitle={currentProject?.name ?? "Untitled book"}
-            chapters={chapters}
-            sourceMarkdown={
-              bookMode ? chapters.map((c) => c.markdown).join("\n\n") : markdown
-            }
-            images={images}
-          />
-        </div>
-      ) : (
       <div
         ref={splitRef}
         className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row"
@@ -2679,7 +2624,6 @@ export default function MarkdownConverter() {
           </Tabs>
         </section>
       </div>
-      )}
       {shortcutsOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"

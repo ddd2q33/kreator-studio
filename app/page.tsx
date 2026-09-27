@@ -1,9 +1,6 @@
-import MarkdownConverter from "@/components/markdown-converter";
+import { redirect } from "next/navigation";
 
+/** The manuscript editor is the default tool. */
 export default function Home() {
-  return (
-    <main className="flex h-dvh flex-col overflow-hidden bg-zinc-50 font-sans dark:bg-black">
-      <MarkdownConverter />
-    </main>
-  );
+  redirect("/manuscript-editor");
 }

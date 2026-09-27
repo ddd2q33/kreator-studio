@@ -18,6 +18,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Kreator Studio v1",
   description: "Forge your story: Markdown to HTML, DOCX, PDF, EPUB and chapter promo videos in one studio",
+  icons: {
+    icon: "/logo.webp",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "brand": "#0d9488",
+  "portrait": true,
+  "scenes": [
+    {
+      "kicker": "SCENE 01",
+      "title": "Hook — la idea en una frase",
+      "subtitle": "Lo que el espectador se lleva",
+      "narration": "La mayoría de los libros fallan en los primeros tres segundos. Este es el truco que sí funciona.",
+      "imageKey": null,
+      "duration": 4,
+      "transition": "fade",
+      "voice": { "voiceId": "21m00Tcm4TlvDq8ikWAM", "modelId": "eleven_multilingual_v2", "stability": 0.5, "similarity": 0.75, "style": 0.4 }
+    },
+    {
+      "kicker": "SCENE 02",
+      "title": "El problema",
+      "subtitle": "Duele, es común, tiene nombre",
+      "narration": "Escribir un capítulo y que nadie lo termine no es mala suerte: es estructura.",
+      "imageKey": null,
+      "duration": 5,
+      "transition": "cut",
+      "voice": { "voiceId": "21m00Tcm4TlvDq8ikWAM", "modelId": "eleven_multilingual_v2", "stability": 0.5, "similarity": 0.75, "style": 0.4 }
+    },
+    {
+      "kicker": "SCENE 03",
+      "title": "La promesa del libro",
+      "subtitle": "Qué se lleva el lector",
+      "narration": "En este capítulo vas a construir el gancho, el bucle y el cierre de tu promoción.",
+      "imageKey": null,
+      "duration": 4,
+      "transition": "zoom",
+      "voice": { "voiceId": "21m00Tcm4TlvDq8ikWAM", "modelId": "eleven_multilingual_v2", "stability": 0.5, "similarity": 0.75, "style": 0.4 }
+    }
+  ]
+}

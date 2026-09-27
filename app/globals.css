@@ -463,3 +463,51 @@
     @apply font-sans;
   }
 }
+
+/* Video studio seek bar: a plain range input with appearance-none shows no
+   track, so the playhead thumb floats invisibly. Paint track + thumb here —
+   arbitrary Tailwind variants for pseudo-elements are not emitted reliably. */
+.video-scrub {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 8px;
+  border-radius: 9999px;
+  background: #3f3f46; /* zinc-700 */
+  cursor: pointer;
+}
+.video-scrub::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: transparent;
+}
+.video-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -3px; /* center 14px thumb on the 8px track */
+  border-radius: 9999px;
+  background: #34d399; /* emerald-400 */
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}
+
+.video-scrub::-webkit-slider-thumb:hover {
+  background: #6ee7b7; /* emerald-300 */
+}
+
+.video-scrub:active::-webkit-slider-thumb {
+  background: #10b981; /* emerald-500 */
+}
+.video-scrub::-moz-range-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: transparent;
+}
+.video-scrub::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 9999px;
+  background: #34d399;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}

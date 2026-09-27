@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "brand": "#4f46e5",
+  "portrait": false,
+  "scenes": [
+    {
+      "kicker": "CH 01",
+      "title": "Chapter 1 — The alarm system",
+      "subtitle": "Why the body reacts before thought",
+      "narration": "When the amygdala senses threat, the body reacts before thought. Regulation begins with naming what is happening.",
+      "imageKey": null,
+      "duration": 6,
+      "transition": "pan",
+      "chapterId": null,
+      "voice": { "voiceId": "pNInz6obpgDQGcFmaJgB", "modelId": "eleven_multilingual_v2", "stability": 0.6, "similarity": 0.8, "style": 0.25 }
+    },
+    {
+      "kicker": "CH 02",
+      "title": "Chapter 2 — Naming the response",
+      "subtitle": "Fight, flight, freeze, fawn",
+      "narration": "These are protective adaptations, not character flaws. Naming them is the first step to working with them.",
+      "imageKey": null,
+      "duration": 6,
+      "transition": "fade",
+      "chapterId": null,
+      "voice": { "voiceId": "pNInz6obpgDQGcFmaJgB", "modelId": "eleven_multilingual_v2", "stability": 0.6, "similarity": 0.8, "style": 0.25 }
+    },
+    {
+      "kicker": "CTA",
+      "title": "Read the full chapter",
+      "subtitle": "Link in description",
+      "narration": "The full workbook walks through each exercise step by step.",
+      "imageKey": null,
+      "duration": 3,
+      "transition": "cut",
+      "chapterId": null,
+      "voice": { "voiceId": "pNInz6obpgDQGcFmaJgB", "modelId": "eleven_multilingual_v2", "stability": 0.6, "similarity": 0.8, "style": 0.25 }
+    }
+  ]
+}
