@@ -54,3 +54,86 @@
  GET /video-editor 200 in 36ms (next.js: 13ms, application-code: 24ms)
 ✓ Compiled in 100ms
  GET /video-editor 200 in 59ms (next.js: 6ms, application-code: 53ms)
+ GET /video-editor 200 in 100ms (next.js: 21ms, application-code: 79ms)
+✓ Compiled in 315ms
+ GET /video-editor 200 in 72ms (next.js: 27ms, application-code: 46ms)
+[browser] Uncaught ReferenceError: LibraryBig is not defined
+    at VideoStudio (components/editor/video-studio.tsx:3097:14)
+    at VideoEditorPage (app/video-editor/page.tsx:121:13)
+  3095 |             title="Images, illustrations, logos, icons, audio and video you keep for both studios"
+  3096 |           >
+> 3097 |             <LibraryBig className="size-3" />
+       |              ^
+  3098 |             Library
+  3099 |           </Button>
+  3100 |           <div
+✓ Compiled in 361ms
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ GET /video-editor 200 in 130ms (next.js: 31ms, application-code: 100ms)
+ GET /video-editor 200 in 99ms (next.js: 14ms, application-code: 86ms)
+ GET /video-editor 200 in 35ms (next.js: 11ms, application-code: 24ms)
+✓ Compiled in 200ms
+✓ Compiled in 110ms
+ GET /video-editor 200 in 46ms (next.js: 16ms, application-code: 30ms)
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+✓ Compiled in 167ms
+ GET /video-editor 200 in 88ms (next.js: 14ms, application-code: 74ms)
+⨯ ReferenceError: APP_VERSION is not defined
+    at Module.eval (app\layout.tsx:23:21)
+    at module evaluation (C:\Users\MANUELA\Documents\GitHub\html-to-docx-converter\.next\dev\server\chunks\ssr\[root-of-the-server]__1jx81qo._.js:136:47)
+  21 |   // Next has no version field for metadata, and a tab title carrying a version
+  22 |   // number goes stale without anyone noticing. The header shows it instead.
+> 23 |   other: { version: APP_VERSION },
+     |                     ^
+  24 |   icons: {
+  25 |     icon: "/logo.webp",
+  26 |     apple: "/apple-touch-icon.png",
+⨯ ReferenceError: APP_VERSION is not defined
+    at Module.eval (app\layout.tsx:23:21)
+    at module evaluation (C:\Users\MANUELA\Documents\GitHub\html-to-docx-converter\.next\dev\server\chunks\ssr\[root-of-the-server]__1jx81qo._.js:136:47)
+  21 |   // Next has no version field for metadata, and a tab title carrying a version
+  22 |   // number goes stale without anyone noticing. The header shows it instead.
+> 23 |   other: { version: APP_VERSION },
+     |                     ^
+  24 |   icons: {
+  25 |     icon: "/logo.webp",
+  26 |     apple: "/apple-touch-icon.png", {
+  page: '/video-editor'
+}
+ GET /video-editor 500 in 2.2s (next.js: 1686ms, application-code: 554ms)
+⨯ ReferenceError: APP_VERSION is not defined
+    at Module.eval (app\layout.tsx:23:21)
+    at module evaluation (C:\Users\MANUELA\Documents\GitHub\html-to-docx-converter\.next\dev\server\chunks\ssr\[root-of-the-server]__1jx81qo._.js:136:47)
+  21 |   // Next has no version field for metadata, and a tab title carrying a version
+  22 |   // number goes stale without anyone noticing. The header shows it instead.
+> 23 |   other: { version: APP_VERSION },
+     |                     ^
+  24 |   icons: {
+  25 |     icon: "/logo.webp",
+  26 |     apple: "/apple-touch-icon.png", {
+  page: '/video-editor'
+}
+⨯ ReferenceError: APP_VERSION is not defined
+    at Module.eval (app\layout.tsx:23:21)
+    at module evaluation (C:\Users\MANUELA\Documents\GitHub\html-to-docx-converter\.next\dev\server\chunks\ssr\[root-of-the-server]__1jx81qo._.js:136:47)
+  21 |   // Next has no version field for metadata, and a tab title carrying a version
+  22 |   // number goes stale without anyone noticing. The header shows it instead.
+> 23 |   other: { version: APP_VERSION },
+     |                     ^
+  24 |   icons: {
+  25 |     icon: "/logo.webp",
+  26 |     apple: "/apple-touch-icon.png", {
+  page: '/video-editor'
+}
+ GET /video-editor 500 in 47ms (next.js: 38ms, application-code: 8ms)
+[browser] Uncaught ReferenceError: APP_VERSION is not defined
+    at Module.eval (app\layout.tsx:23:21)
+    at module evaluation (app/layout.tsx:45:29)
+  21 |   // Next has no version field for metadata, and a tab title carrying a version
+  22 |   // number goes stale without anyone noticing. The header shows it instead.
+> 23 |   other: { version: APP_VERSION },
+     |                     ^
+  24 |   icons: {
+  25 |     icon: "/logo.webp",
+  26 |     apple: "/apple-touch-icon.png",
+ GET /video-editor 200 in 55ms (next.js: 23ms, application-code: 31ms)

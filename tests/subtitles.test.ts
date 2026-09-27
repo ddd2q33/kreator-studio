@@ -6,6 +6,7 @@ import {
   MAX_CHARS_PER_CUE,
   MIN_CUE_SECONDS,
   SUBTITLE_STYLES,
+  SUBTITLE_STYLE_GROUPS,
   subtitleStyleById,
   buildTimelineCues,
   cueAt,
@@ -380,6 +381,36 @@ describe("subtitle style templates", () => {
 
   it("keeps the default in the catalog", () => {
     assert.ok(SUBTITLE_STYLES.some((s) => s.id === DEFAULT_SUBTITLE_STYLE_ID));
+  });
+
+  it("gives every template the fields the picker previews need", () => {
+    for (const s of SUBTITLE_STYLES) {
+      assert.ok(s.description.length > 0, `${s.id} has no description`);
+      assert.ok(s.category.length > 0, `${s.id} has no category`);
+      assert.ok(s.fontFamily.length > 0, `${s.id} has no font family`);
+      assert.ok(
+        ["center", "left", "right"].includes(s.align),
+        `${s.id} has an unknown align`,
+      );
+      assert.ok(s.speed > 0, `${s.id} has a non-positive speed`);
+    }
+  });
+
+  it("groups every template into the picker sections", () => {
+    const grouped = new Set(SUBTITLE_STYLE_GROUPS.flatMap((g) => [...g.ids]));
+    for (const s of SUBTITLE_STYLES) {
+      assert.ok(grouped.has(s.id), `${s.id} is missing from the picker groups`);
+    }
+    for (const g of SUBTITLE_STYLE_GROUPS) {
+      for (const id of g.ids) {
+        const style = subtitleStyleById(id);
+        assert.equal(
+          style.category,
+          g.label,
+          `${id} sits in category ${style.category}, not in group ${g.label}`,
+        );
+      }
+    }
   });
 });
 

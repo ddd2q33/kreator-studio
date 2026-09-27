@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Clapperboard, FileText, LibraryBig } from "lucide-react";
 
 import { useLibraryOpen } from "@/components/editor/library-toggle";
+import { APP_VERSION } from "@/lib/app-version";
 
 /**
  * Shared top bar for the two studio tools. Each tool lives on its own route
@@ -33,7 +34,7 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
           unoptimized
           className="size-7 shrink-0 object-contain"
         />
-        <h1 className="text-sm font-semibold tracking-tight">Kreator Studio v1</h1>
+        <h1 className="text-sm font-semibold tracking-tight">Kreator Studio</h1>
         <button
           type="button"
           onClick={() => setLibraryOpen(true)}
@@ -80,7 +81,18 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
         </div>
       </div>
 
-      {right}
+      <div className="flex shrink-0 items-center gap-3">
+        {right}
+        {/* Build info, not brand. It is the least interesting thing in the bar,
+            so it goes in the corner at the lowest contrast rather than sitting
+            next to the name where it competes with it. */}
+        <span
+          className="font-mono text-[10px] tabular-nums text-muted-foreground/50"
+          title={`Kreator Studio ${APP_VERSION}`}
+        >
+          v{APP_VERSION}
+        </span>
+      </div>
     </header>
   );
 }

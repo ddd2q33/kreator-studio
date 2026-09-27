@@ -15,6 +15,7 @@ import {
   Download,
   GripVertical,
   Image as ImageIcon,
+  LibraryBig,
   Mic,
   Maximize,
   Minimize,
@@ -3087,6 +3088,16 @@ export function VideoStudio({
       <div className="flex h-11 shrink-0 items-center gap-3 border-b bg-muted/40 px-3">
         <div className="flex min-w-0 items-center gap-2" />
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button
+            variant={libraryOpen ? "secondary" : "outline"}
+            size="sm"
+            className="h-6 gap-1 px-2 text-[11px]"
+            onClick={() => setLibraryOpen(!libraryOpen)}
+            title="Images, illustrations, logos, icons, audio and video you keep for both studios"
+          >
+            <LibraryBig className="size-3" />
+            Library
+          </Button>
           <div
             className="flex items-center gap-1.5"
             title="Brand accent color"
