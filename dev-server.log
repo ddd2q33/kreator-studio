@@ -1,0 +1,56 @@
+
+> book-studio@0.1.0 dev
+> next dev
+
+▲ Next.js 16.3.5 (Turbopack)
+- Local:         http://localhost:65482
+- Network:       http://172.16.0.2:65482
+✓ Ready in 4.5s
+✓ Running next.config.ts took 337ms
+
+ GET /video-editor 200 in 478ms (next.js: 189ms, application-code: 289ms)
+ GET /video-editor 200 in 61ms (next.js: 7ms, application-code: 53ms)
+✓ Compiled in 120ms
+ GET /video-editor 200 in 43ms (next.js: 15ms, application-code: 28ms)
+[browser] Uncaught ReferenceError: pieceWordCount is not defined
+    at eval (lib/subtitles.ts:265:38)
+    at Array.forEach (<anonymous>)
+    at cuesForScene (lib/subtitles.ts:232:10)
+    at buildTimelineCues (lib/subtitles.ts:383:20)
+    at VideoStudio.useMemo[subtitleCues] (components/editor/video-studio.tsx:1151:24)
+    at VideoStudio (components/editor/video-studio.tsx:1149:31)
+    at VideoEditorPage (app/video-editor/page.tsx:121:13)
+  263 |         end: Math.max(cursor, end),
+  264 |         words: slice,
+> 265 |         lineStarts: slice.length === pieceWordCount ? lineStarts : [],
+      |                                      ^
+  266 |       });
+  267 |     }
+  268 |     cursor += share;
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+✓ Compiled in 94ms
+[browser] Encountered a script tag while rendering React component. Scripts inside React components are never executed when rendering on the client. Consider using template tag instead (https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template). 
+    at Set.forEach (<anonymous>) (<anonymous>)
+ GET /video-editor 200 in 76ms (next.js: 11ms, application-code: 65ms)
+ GET /video-editor 200 in 65ms (next.js: 6ms, application-code: 59ms)
+✓ Compiled in 192ms
+ GET /video-editor 200 in 63ms (next.js: 41ms, application-code: 22ms)
+✓ Compiled in 145ms
+ GET /video-editor 200 in 34ms (next.js: 13ms, application-code: 21ms)
+✓ Compiled in 126ms
+[browser] Uncaught ReferenceError: SubtitleStylePicker is not defined
+    at VideoStudio (components/editor/video-studio.tsx:3665:14)
+    at VideoEditorPage (app/video-editor/page.tsx:121:13)
+  3663 |               Subs
+  3664 |             </Button>
+> 3665 |             <SubtitleStylePicker
+       |              ^
+  3666 |               value={subtitleStyleId}
+  3667 |               onChange={setSubtitleStyleId}
+  3668 |               disabled={!subtitlesOn}
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+✓ Compiled in 154ms
+ GET /video-editor 200 in 67ms (next.js: 11ms, application-code: 55ms)
+ GET /video-editor 200 in 36ms (next.js: 13ms, application-code: 24ms)
+✓ Compiled in 100ms
+ GET /video-editor 200 in 59ms (next.js: 6ms, application-code: 53ms)

@@ -200,6 +200,50 @@ describe("cuesForScene", () => {
       assert.ok(cue.end > cue.start, `cue ends at ${cue.end} but starts at ${cue.start}`);
     }
   });
+
+  it("times every word inside its own cue's window", () => {
+    // Reading-paced cue windows carry floors, while a whole-scene word spread
+    // is syllable-paced, so the two only stay in step if the words are timed
+    // against the very window they colour.
+    const narration = "The first words are here and then the rest follows slowly after them.";
+    const cues = cuesForScene(narration, 3, 5);
+    for (const cue of cues) {
+      for (const word of cue.words) {
+        assert.ok(
+          word.start >= cue.start - 1e-6 && word.end <= cue.end + 1e-6,
+          `word "${word.text}" at ${word.start}–${word.end} escapes its cue ${cue.start}–${cue.end}`,
+        );
+      }
+    }
+  });
+
+  it("lights the highlight up in reading order over the scene", () => {
+    const narration = "But silence felt louder than words.";
+    const cues = cuesForScene(narration, 0, 3);
+    const perTime: Array<string> = [];
+    for (let t = 0; t < 3; t += 0.1) {
+      const cue = cueAt(cues, t);
+      const spoken = cue ? activeWordIndex(cue, t) : -1;
+      perTime.push(cue && spoken >= 0 ? (cue.words[spoken]?.text ?? "") : "");
+    }
+    const spoken = perTime.filter((w) => w !== "");
+    assert.ok(spoken.length > 0, "some word is lit at some point");
+    for (let i = 1; i < spoken.length; i++) {
+      const prev = narration.split(" ").indexOf(spoken[i - 1]!);
+      const next = narration.split(" ").indexOf(spoken[i]!);
+      assert.ok(
+        next >= prev,
+        `highlight went backwards: "${spoken[i - 1]}" then "${spoken[i]}"`,
+      );
+    }
+  });
+
+  it("keeps a single-word cue lit for its whole window", () => {
+    const cues = cuesForScene("Again...", 2, 1);
+    assert.equal(cues.length, 1);
+    assert.equal(activeWordIndex(cues[0]!, 2.1), 0);
+    assert.equal(activeWordIndex(cues[0]!, 2.9), 0);
+  });
 });
 
 describe("buildTimelineCues", () => {

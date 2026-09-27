@@ -3,16 +3,23 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Clapperboard, FileText } from "lucide-react";
+import { Clapperboard, FileText, LibraryBig } from "lucide-react";
+
+import { useLibraryOpen } from "@/components/editor/library-toggle";
 
 /**
  * Shared top bar for the two studio tools. Each tool lives on its own route
  * ( /manuscript-editor , /video-editor ) so the browser only loads the code
  * for the tool in use; the active tab is derived from the URL.
+ *
+ * The library trigger lives here because this is the only bar both routes have.
+ * It is a global asset pool, so it should not look like it belongs to one of
+ * the two tools.
  */
 export function StudioHeader({ right }: { right?: React.ReactNode }) {
   const pathname = usePathname();
   const videoMode = pathname.startsWith("/video-editor");
+  const [libraryOpen, setLibraryOpen] = useLibraryOpen();
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-background px-4">
@@ -27,6 +34,20 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
           className="size-7 shrink-0 object-contain"
         />
         <h1 className="text-sm font-semibold tracking-tight">Kreator Studio v1</h1>
+        <button
+          type="button"
+          onClick={() => setLibraryOpen(true)}
+          aria-expanded={libraryOpen}
+          title="Images, illustrations, logos, icons, audio and video you keep for both studios"
+          className={`ml-1 flex size-7 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+            libraryOpen
+              ? "border-ring bg-muted text-foreground"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          }`}
+        >
+          <LibraryBig className="size-4" />
+          <span className="sr-only">Open asset library</span>
+        </button>
         <div
           className="ml-1 flex items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5"
           role="group"

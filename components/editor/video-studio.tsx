@@ -18,7 +18,6 @@ import {
   Mic,
   Maximize,
   Minimize,
-  LibraryBig,
   Pause,
   Play,
   Plus,
@@ -106,13 +105,12 @@ import {
   toSrt,
   regionsFromWords,
   estimateNarrationSeconds,
-  SUBTITLE_STYLES,
-  SUBTITLE_STYLE_GROUPS,
   DEFAULT_SUBTITLE_STYLE_ID,
   subtitleStyleById,
   entranceSecondsFor,
 } from "@/lib/subtitles";
 import type { SubtitleCue, SubtitleStyle } from "@/lib/subtitles";
+import { SubtitleStylePicker } from "./subtitle-style-picker";
 import {
   composeTransform,
   cuePhaseAt,
@@ -142,6 +140,7 @@ import {
 import { ExportHub } from "@/components/editor/export-hub";
 import type { ExportTarget as ExportTargetSpec } from "@/components/editor/export-hub";
 import { AssetLibrary } from "@/components/editor/asset-library";
+import { useLibraryOpen } from "@/components/editor/library-toggle";
 import type { Asset } from "@/lib/asset-library";
 import {
   EXPORT_FPS,
@@ -733,7 +732,7 @@ function isWordVisible(
   return scope === "line" || phase.visible;
 }
 
-function paintSubtitle(
+export function paintSubtitle(
 
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -1113,7 +1112,7 @@ export function VideoStudio({
   /** Hidden file inputs, one per scene, so the picker opens the right one. */
   const audioInputRefs = useRef(new Map<string, HTMLInputElement>());
   const [subtitlesOn, setSubtitlesOn] = useState(true);
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useLibraryOpen();
   const [subtitleStyleId, setSubtitleStyleId] = useState<string>(() => {
     if (typeof window === "undefined") return DEFAULT_SUBTITLE_STYLE_ID;
     try {
@@ -1697,9 +1696,16 @@ export function VideoStudio({
    * back a plain File, exactly like a drop from the desktop would.
    */
   const useLibraryAsset = useCallback(
-    (file: File, asset: Asset) => {
-      const targetId = selectedId;
-      if (!targetId) return;
+      (file: File, asset: Asset) => {
+        const targetId = selectedId;
+        if (!targetId) {
+          // The trigger now lives in the shared header, so it is reachable with
+          // nothing selected. Saying nothing here would look like the pick
+          // failed.
+          setStatus("Select a scene first, then pick from the library.");
+          return;
+        }
+
       if (asset.kind === "audio") {
         void attachAudio(targetId, file);
         return;
@@ -3655,51 +3661,11 @@ export function VideoStudio({
               <Captions className="size-3.5" />
               Subs
             </Button>
-            <select
+            <SubtitleStylePicker
               value={subtitleStyleId}
-              onChange={(e) => setSubtitleStyleId(e.target.value)}
+              onChange={setSubtitleStyleId}
               disabled={!subtitlesOn}
-              className="h-6 max-w-28 rounded border bg-background px-1 text-[11px] outline-none focus:border-ring disabled:opacity-40"
-              aria-label="Subtitle style template"
-              // The description is the reason to pick one over another, and a
-              // native tooltip is the only place to put it without pushing the
-              // toolbar around.
-              title={
-                subtitleStyle
-                  ? `${subtitleStyle.label} - ${subtitleStyle.description}`
-                  : "Subtitle style template"
-              }
-            >
-              {/* Grouped so the seven designed templates read as the current
-                  set and the originals sit underneath as the familiar ones. */}
-              {SUBTITLE_STYLE_GROUPS.map((group) => (
-                <optgroup key={group.label} label={group.label}>
-                  {SUBTITLE_STYLES.filter((s) => s.category === group.label).map(
-                    (s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.label}
-                        {s.recommended ? " - recommended" : ""}
-                      </option>
-                    ),
-                  )}
-                </optgroup>
-              ))}
-            </select>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1 px-2 text-[11px]"
-              onClick={() => setLibraryOpen(true)}
-              disabled={!selectedId}
-              title={
-                selectedId
-                  ? "Pick an image, clip or video you already keep in the library"
-                  : "Select a scene first"
-              }
-            >
-              <LibraryBig className="size-3.5" />
-              Library
-            </Button>
+            />
             <ExportHub
               targets={hubTargets}
               defaultId="mp4"

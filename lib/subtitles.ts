@@ -229,18 +229,6 @@ export function cuesForScene(
   let cursor = startSeconds;
   const cues: SubtitleCue[] = [];
 
-  // Word timings for the estimate path too: the whole narration is spread over
-  // the spoken span with the same syllable weighting the aligned path uses, so
-  // the karaoke highlight works before any audio is attached (it just tracks
-  // the estimate instead of a real voice). Without this the highlight only
-  // ever moved for scenes carrying analysed audio.
-  const allWords = splitWords(narration);
-  const alignedWords =
-    allWords.length > 0 && used > 0
-      ? alignWords(allWords, [{ start: startSeconds, end: startSeconds + used }])
-      : [];
-  let wordCursor = 0;
-
   pieces.forEach((piece, i) => {
     const share = (weights[i]! / totalWeight) * used;
     // Keep a cue from flashing past, but never let that minimum push it past
@@ -248,9 +236,21 @@ export function cuesForScene(
     const end = Math.min(sceneEnd, Math.max(cursor + 0.05, cursor + share));
     const lines = wrapCue(piece);
     if (lines.length > 0) {
-      const pieceWordCount = splitWords(piece).length;
-      const slice = alignedWords.slice(wordCursor, wordCursor + pieceWordCount);
-      wordCursor += pieceWordCount;
+      // Word timings for the estimate path: each cue's own words are spread
+      // over that cue's window with the same syllable weighting the aligned
+      // path uses, so the karaoke highlight works before any audio is attached
+      // and always lands inside the window it colours. Spreading the whole
+      // narration once across the scene instead let the cue windows
+      // (read-paced, with floors) and the word timings (syllable-paced,
+      // continuous) drift apart — a word's start could land in the next cue's
+      // window, so the highlight skipped words or lit the wrong one.
+      const pieceWords = splitWords(piece);
+      const slice =
+        pieceWords.length > 0
+          ? alignWords(pieceWords, [
+              { start: cursor, end: Math.max(cursor, end) },
+            ])
+          : [];
       const lineStarts: number[] = [];
       let seen = 0;
       for (const line of lines) {
@@ -262,7 +262,7 @@ export function cuesForScene(
         start: cursor,
         end: Math.max(cursor, end),
         words: slice,
-        lineStarts: slice.length === pieceWordCount ? lineStarts : [],
+        lineStarts: slice.length === pieceWords.length ? lineStarts : [],
       });
     }
     cursor += share;

@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AssetLibrary } from "@/components/editor/asset-library";
+import { useLibraryOpen } from "@/components/editor/library-toggle";
 import type { Asset } from "@/lib/asset-library";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -431,7 +432,7 @@ export default function MarkdownConverter() {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [images, setImages] = useState<ImageMap>({});
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useLibraryOpen();
   const [hydrated, setHydrated] = useState(false);
   const [autoSaved, setAutoSaved] = useState(false);
   const lastSourceRef = useRef(markdown);
@@ -1934,10 +1935,6 @@ export default function MarkdownConverter() {
                 className="hidden"
               />
             </label>
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setLibraryOpen(true)}>
-            <Library />
-            Library
           </Button>
           <Button size="sm" variant="outline" asChild>
             <label>
