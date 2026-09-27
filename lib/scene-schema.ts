@@ -31,7 +31,7 @@ export const DEFAULT_BRAND = "#0d9488";
 export const DURATION_MIN = 1;
 export const DURATION_MAX = 20;
 export const DURATION_DEFAULT = 4;
-/** ElevenLabs rejects longer texts; kept in sync with app/api/tts/route.ts. */
+/** Generous ceiling for a narration field; nothing uploads it any more. */
 export const NARRATION_MAX = 5000;
 
 export type Transition = "cut" | "fade" | "zoom" | "pan";
@@ -43,25 +43,59 @@ export const TRANSITIONS: readonly Transition[] = [
   "pan",
 ];
 
-export const ELEVEN_MODEL_IDS = {
-  multilingual: "eleven_multilingual_v2",
-  flash: "eleven_flash_v2_5",
-  turbo: "eleven_turbo_v2_5",
-} as const;
+/**
+ * How the image fills the 16:9 frame.
+ *
+ * `contain` is the default because that is what the renderer has always done:
+ * a wrongly-proportioned image shows the whole picture over the brand gradient
+ * instead of losing the edges. `cover` crops to fill the frame, which is the
+ * right choice for a background but can cut the one part of a diagram a scene is
+ * about, so it is a per-scene decision rather than a global setting.
+ */
+export type ImageFit = "cover" | "contain" | "fill";
 
-export const ELEVEN_MODEL_ID_LIST: readonly string[] = Object.values(
-  ELEVEN_MODEL_IDS,
-);
+export const IMAGE_FITS: readonly ImageFit[] = ["cover", "contain", "fill"];
 
-export const DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
-export const DEFAULT_MODEL_ID = ELEVEN_MODEL_IDS.multilingual;
+export const DEFAULT_IMAGE_FIT: ImageFit = "contain";
 
-export type SceneVoiceConfig = {
-  voiceId: string;
-  modelId: string;
-  stability: number;
-  similarity: number;
-  style: number;
+const asImageFit = (v: unknown, fallback: ImageFit): ImageFit =>
+  typeof v === "string" && (IMAGE_FITS as readonly string[]).includes(v)
+    ? (v as ImageFit)
+    : fallback;
+
+const asGain = (v: unknown, fallback: number): number => {
+  const n = asNumber(v);
+  if (n === null) return fallback;
+  return Math.min(1, Math.max(0, n));
+};
+
+/**
+ * The voice-over a scene plays, described without the audio itself.
+ *
+ * The bytes live in IndexedDB under `key` (see lib/audio-store.ts) because they
+ * are far too large for localStorage; `duration` and `bytes` are kept here so
+ * the editor can label the clip and stretch the scene before reading it back.
+ */
+export type SceneAudio = {
+  /** IndexedDB key for the stored Blob. */
+  key: string;
+  /** Original file name, shown next to the clip. */
+  name: string;
+  /** Length in seconds, measured when the file was dropped. */
+  duration: number;
+  /** Size of the stored blob in bytes. */
+  bytes: number;
+  /** MIME type reported by the browser, used to pick a decoder. */
+  type: string;
+  /**
+   * Stretches of the clip where the voice is audible, clip-relative seconds.
+   *
+   * Measured once when the file is attached so the subtitles can be aligned to
+   * the real pauses and highlighted word by word without re-decoding the audio
+   * on every reload. Empty means the analysis did not run, and the subtitles
+   * fall back to being estimated from the text.
+   */
+  regions: { start: number; end: number }[];
 };
 
 export type VideoScene = {
@@ -80,9 +114,22 @@ export type VideoScene = {
   narration: string;
   /** Key into the app's image map (a file name), never a data URL. */
   imageKey: string | null;
+  /**
+   * How the image fills the 16:9 frame. `contain` is the default so existing
+   * projects keep the look they were authored with; see `ImageFit`.
+   */
+  imageFit: ImageFit;
   duration: number;
   transition: Transition;
-  voice: SceneVoiceConfig;
+  /** Dropped audio for this scene, or null for a silent one. */
+  audio: SceneAudio | null;
+  /**
+   * Linear gain for this scene's clip, 0..1. Authored per scene so a loud take
+   * next to a quiet one needs no gain ride in the mix.
+   */
+  volume: number;
+  /** Muted scenes keep their clip but contribute silence, for a beat without deleting it. */
+  muted: boolean;
 };
 
 export type SceneDocument = {
@@ -90,20 +137,9 @@ export type SceneDocument = {
   brand: string;
   portrait: boolean;
   scenes: VideoScene[];
+  /** Optional subtitle style template id (lib/subtitles.ts SUBTITLE_STYLES). */
+  subtitleStyleId?: string;
 };
-
-export function defaultVoiceConfig(
-  overrides: Partial<SceneVoiceConfig> = {},
-): SceneVoiceConfig {
-  return {
-    voiceId: DEFAULT_VOICE_ID,
-    modelId: DEFAULT_MODEL_ID,
-    stability: 0.5,
-    similarity: 0.75,
-    style: 0.3,
-    ...overrides,
-  };
-}
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -132,12 +168,6 @@ const clamp = (n: number, lo: number, hi: number): number =>
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-/** Every voice control is a 0–1 slider in the UI and is clamped server-side too. */
-const asUnit = (v: unknown, fallback: number): number => {
-  const n = asNumber(v);
-  return n === null ? fallback : clamp(n, 0, 1);
-};
-
 const isHexColor = (v: string): boolean =>
   /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(v);
 
@@ -146,39 +176,176 @@ export type NormalizeOptions = {
   imageKeys?: readonly string[];
   /** Chapter ids in the active book, used to flag dangling chapter links. */
   chapterIds?: readonly string[];
+  /** Clip keys present in IndexedDB. When given, unknown audio is cleared. */
+  audioKeys?: readonly string[];
+  /**
+   * Suppresses the "has no title" warning.
+   *
+   * A blank title is only worth reporting when the author was expected to write
+   * one. Inside a grouped scene the title lives on the section, so every
+   * subscene is titled blank by design and warning about each one turns a valid
+   * file into a wall of noise — and, worse, teaches the author to ignore the
+   * warnings that do matter.
+   */
+  titleOptional?: boolean;
   /** Injectable id factory, so tests can assert on deterministic ids. */
   newId?: () => string;
 };
 
-export function normalizeVoiceConfig(input: unknown): {
-  voice: SceneVoiceConfig;
-  warnings: string[];
-} {
-  const base = defaultVoiceConfig();
-  if (!isRecord(input)) return { voice: base, warnings: [] };
-
+/**
+ * Expands the grouped authoring format into a run of flat scenes:
+ *
+ *   { "scene": "The Silence", "subscenes": [ { "narration": … }, … ] }
+ *
+ * The group takes its label from `scene` (or the group's first subscene
+ * `title`/`group` field as fallbacks) and is inherited by every subscene, so
+ * the timeline draws one section header for the whole run. Subscene fields use
+ * the same names as full scenes; `image`/`imageKey` is resolved against the
+ * image map at the group level too, and missing fields fall back to defaults
+ * (duration 4s, transition fade) exactly like flat scenes do.
+ */
+function expandGroupedScene(
+  input: Record<string, unknown>,
+  subscenes: unknown[],
+  index: number,
+  options: NormalizeOptions = {},
+): { scene: VideoScene | null; warnings: string[] } {
+  const label = `Scene ${index + 1}`;
   const warnings: string[] = [];
-  const voiceId = asOptionalText(input.voiceId) ?? base.voiceId;
-  const rawModelId = asOptionalText(input.modelId);
-  const modelId =
-    rawModelId && ELEVEN_MODEL_ID_LIST.includes(rawModelId)
-      ? rawModelId
-      : base.modelId;
-  if (rawModelId && modelId !== rawModelId) {
-    warnings.push(
-      `unknown ElevenLabs model "${rawModelId}" — used ${base.modelId}`,
+
+  const groupLabel =
+    asOptionalText(input.scene) ??
+    asOptionalText(input.title) ??
+    asOptionalText(input.group) ??
+    `Section ${index + 1}`;
+
+  // Optional per-group defaults the subscenes can override individually.
+  const groupDefaults = {
+    imageKey: asOptionalText(input.image) ?? asOptionalText(input.imageKey),
+    kicker: asOptionalText(input.kicker) ?? "",
+    imageFit: asImageFit(input.imageFit, DEFAULT_IMAGE_FIT),
+    volume: asGain(input.volume, 1),
+    muted: input.muted === true,
+  };
+
+  const scenes: VideoScene[] = [];
+  subscenes.forEach((raw, subIndex) => {
+    const subLabel = `${label} · subscene ${subIndex + 1}`;
+    if (!isRecord(raw)) {
+      warnings.push(`${subLabel} is not an object — skipped.`);
+      return;
+    }
+    const result = normalizeScene(
+      {
+        ...raw,
+        // Group label flows to the scene; the subscene's own group/title win if
+        // the author overrode them (an explicit override starts a new section).
+        group: asOptionalText(raw.group) ?? groupLabel,
+        title: asOptionalText(raw.title) ?? "",
+        kicker: asOptionalText(raw.kicker) ?? groupDefaults.kicker,
+        imageKey:
+          asOptionalText(raw.imageKey) ?? asOptionalText(raw.image) ?? groupDefaults.imageKey,
+        imageFit: asImageFit(raw.imageFit, groupDefaults.imageFit),
+        volume: asGain(raw.volume, groupDefaults.volume),
+        muted: raw.muted === true || groupDefaults.muted,
+      },
+      subIndex,
+      { ...options, titleOptional: true },
     );
+    if (result.scene) {
+      // The subscene's own group wins when it set one; otherwise it inherits the
+      // section. Forcing groupLabel here would discard the override the call
+      // above just resolved, making it impossible for a subscene to open a new
+      // section from inside a group.
+      scenes.push({ ...result.scene, group: result.scene.group ?? groupLabel });
+      warnings.push(...result.warnings.map((w) => w.replace(/^Scene \d+:/, subLabel + ":")));
+    } else {
+      warnings.push(...result.warnings.map((w) => w.replace(/^Scene \d+:/, subLabel + ":")));
+    }
+  });
+
+  if (scenes.length === 0) {
+    warnings.push(`${label}: group "${groupLabel}" has no usable subscenes — skipped.`);
+    return { scene: null, warnings };
   }
 
+  // The first scene of the group carries the group's title as its own title
+  // when the subscene has none, so the section header and the first frame
+  // agree without the author writing it twice.
+  if (!scenes[0]!.title && scenes.length > 0) {
+    scenes[0] = { ...scenes[0]!, title: groupLabel };
+  }
+
+  // Flatten: the first scene carries the group's id slot; the rest are
+  // siblings. Returning one representative keeps the normalizeScene contract.
+  // The remaining scenes ride along via the extra field below.
+  return { scene: scenes[0]!, warnings, extra: scenes.slice(1) } as {
+    scene: VideoScene | null;
+    warnings: string[];
+    extra?: VideoScene[];
+  };
+}
+
+/**
+ * Keeps only usable speech regions, in order and non-overlapping.
+ *
+ * These numbers come from a hand-editable JSON file, so a bad entry must not be
+ * able to produce negative spans or a region that starts before the one before
+ * it, which would make the word aligner loop or run backwards.
+ */
+function normalizeSpeechRegions(input: unknown): { start: number; end: number }[] {
+  if (!Array.isArray(input)) return [];
+  const out: { start: number; end: number }[] = [];
+  for (const entry of input) {
+    if (!isRecord(entry)) continue;
+    const start = asNumber(entry.start);
+    const end = asNumber(entry.end);
+    if (start === null || end === null) continue;
+    const region = { start: round2(start), end: round2(end) };
+    if (region.end <= region.start) continue;
+    const last = out[out.length - 1];
+    // Overlapping or out-of-order regions would break the cumulative walk.
+    if (last && region.start < last.end) continue;
+    out.push(region);
+  }
+  return out;
+}
+
+/**
+ * Repairs a scene's audio descriptor.
+ *
+ * The blob itself is checked against `audioKeys` so a scene JSON that
+ * references a clip the browser no longer has comes back silent instead of
+ * failing to play at export time. Callers that do not pass `audioKeys` (the
+ * common case, since IndexedDB is only read on demand) keep the descriptor.
+ */
+export function normalizeSceneAudio(
+  input: unknown,
+  options: Pick<NormalizeOptions, "audioKeys"> = {},
+): { audio: SceneAudio | null; warnings: string[] } {
+  if (!isRecord(input)) return { audio: null, warnings: [] };
+  const key = asOptionalText(input.key);
+  if (!key) return { audio: null, warnings: [] };
+
+  if (options.audioKeys && !options.audioKeys.includes(key)) {
+    return {
+      audio: null,
+      warnings: [`audio "${key}" is no longer in browser storage — dropped`],
+    };
+  }
+
+  const bytes = asNumber(input.bytes);
+  const duration = asNumber(input.duration);
   return {
-    voice: {
-      voiceId,
-      modelId,
-      stability: asUnit(input.stability, base.stability),
-      similarity: asUnit(input.similarity, base.similarity),
-      style: asUnit(input.style, base.style),
+    audio: {
+      key,
+      name: asText(input.name, key),
+      duration: duration === null ? 0 : Math.max(0, round2(duration)),
+      bytes: bytes === null ? 0 : Math.max(0, Math.round(bytes)),
+      type: asText(input.type, "audio/mpeg"),
+      regions: normalizeSpeechRegions(input.regions),
     },
-    warnings,
+    warnings: [],
   };
 }
 
@@ -201,10 +368,19 @@ export function normalizeScene(
     return { scene: null, warnings: [`${label} is not an object — skipped.`] };
   }
 
+  // Grouped authoring format: { scene, subscenes: [...] } describes ONE
+  // timeline section — `scene` names the group and each subscene becomes a
+  // plain scene carrying that group label, so the timeline renders one header
+  // per section while every subscene stays individually editable.
+  const rawSubscenes = (input as { subscenes?: unknown }).subscenes;
+  if (Array.isArray(rawSubscenes) && rawSubscenes.length > 0) {
+    return expandGroupedScene(input, rawSubscenes, index, options);
+  }
+
   const title = asText(input.title, "");
 
   const warnings: string[] = [];
-  if (!title) {
+  if (!title && !options.titleOptional) {
     warnings.push(`${label} has no "title" — kept as a blank frame.`);
   }
 
@@ -241,7 +417,7 @@ export function normalizeScene(
     typeof input.narration === "string" ? input.narration.trim() : "";
   if (narration.length > NARRATION_MAX) {
     warnings.push(
-      `narration is ${narration.length} chars — the TTS API rejects anything over ${NARRATION_MAX}`,
+      `narration is ${narration.length} chars — trimmed to ${NARRATION_MAX}`,
     );
   }
 
@@ -256,8 +432,10 @@ export function normalizeScene(
     warnings.push(`chapterId "${chapterId}" matches no chapter in this book`);
   }
 
-  const { voice, warnings: voiceWarnings } = normalizeVoiceConfig(input.voice);
-  warnings.push(...voiceWarnings);
+  const { audio, warnings: audioWarnings } = normalizeSceneAudio(input.audio, {
+    audioKeys: options.audioKeys,
+  });
+  warnings.push(...audioWarnings);
 
   return {
     scene: {
@@ -269,9 +447,12 @@ export function normalizeScene(
       subtitle: asText(input.subtitle, ""),
       narration,
       imageKey,
+      imageFit: asImageFit(input.imageFit, DEFAULT_IMAGE_FIT),
       duration,
       transition,
-      voice,
+      audio,
+      volume: asGain(input.volume, 1),
+      muted: input.muted === true,
     },
     warnings: warnings.map((w) => `${label}: ${w}`),
   };
@@ -289,7 +470,10 @@ export function normalizeScenes(
   const warnings: string[] = [];
   input.forEach((raw, index) => {
     const result = normalizeScene(raw, index, options);
-    if (result.scene) scenes.push(result.scene);
+    // Grouped scenes ({ scene, subscenes }) expand into a run of flat scenes;
+    // the representative is the first, the rest ride on `extra`.
+    const extra = (result as { extra?: VideoScene[] }).extra ?? [];
+    if (result.scene) scenes.push(result.scene, ...extra);
     warnings.push(...result.warnings);
   });
 
@@ -301,15 +485,62 @@ export function normalizeScenes(
  * Accepts either a full document or a bare array of scenes, so the smallest
  * useful file is `[ { "title": "…" } ]`.
  */
+/**
+ * Normalizes whatever the Scene JSON editor was handed.
+ *
+ * The editor accepts three different shapes and the difference decides whether
+ * the content replaces the selected scene, becomes a new section, or lands on
+ * the timeline whole. That routing used to live in the component, where nothing
+ * could test it, and the one case it got wrong turned a 32-scene episode into a
+ * single blank frame: the top-level `scenes` key was read as an unknown field
+ * because the draft had been wrapped as one scene first.
+ *
+ * - `{ scenes: [...] }` is a whole document: many sections at once.
+ * - `{ scene, subscenes: [...] }` is one section.
+ * - Anything else that is an object is a single scene.
+ */
+export function normalizeSceneInput(
+  input: unknown,
+  options: NormalizeOptions = {},
+): { document: SceneDocument | null; warnings: string[] } {
+  if (Array.isArray(input)) {
+    return {
+      document: null,
+      warnings: [
+        "Expected a scene object or a document with a \"scenes\" array, not a bare array.",
+      ],
+    };
+  }
+  if (!isRecord(input)) {
+    return {
+      document: null,
+      warnings: ["A scene must be a JSON object."],
+    };
+  }
+  // A `scenes` array means this is a document, not one scene. Anything else is a
+  // single scene, which is the only shape that replaces what is selected.
+  return Array.isArray((input as { scenes?: unknown }).scenes)
+    ? normalizeSceneDocument(input, options)
+    : normalizeSceneDocument({ scenes: [input] }, options);
+}
+
 export function normalizeSceneDocument(
   input: unknown,
   options: NormalizeOptions = {},
 ): { document: SceneDocument | null; warnings: string[] } {
-  const raw = Array.isArray(input) ? { scenes: input } : input;
+  // A single grouped scene at top level ({ scene, subscenes }) is its own file
+  // shape: treat it as a one-section document.
+  const singleGroup =
+    !Array.isArray(input) &&
+    isRecord(input) &&
+    Array.isArray((input as { subscenes?: unknown }).subscenes)
+      ? { scenes: [input] }
+      : input;
+  const raw = Array.isArray(singleGroup) ? { scenes: singleGroup } : singleGroup;
   if (!isRecord(raw)) {
     return {
       document: null,
-      warnings: ["A scene file must be an object, or an array of scenes."],
+      warnings: ["A scene file must be an object, an array of scenes, or a { scene, subscenes } group."],
     };
   }
 
@@ -339,6 +570,7 @@ export function normalizeSceneDocument(
       brand,
       portrait: raw.portrait === true,
       scenes,
+      subtitleStyleId: asOptionalText(raw.subtitleStyleId) ?? undefined,
     },
     warnings,
   };

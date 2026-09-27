@@ -5,34 +5,32 @@ import { useCallback, useEffect, useState } from "react";
 import { VideoStudio } from "@/components/editor/video-studio";
 import { StudioHeader } from "@/components/studio-header";
 import type { Chapter } from "@/lib/projects";
-
-/** Kept in sync with components/markdown-converter.tsx so both editors share the pool. */
-const STORAGE_KEY_IMAGES = "markdown-converter-images";
-
-function persistImages(images: Record<string, string>): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      STORAGE_KEY_IMAGES,
-      JSON.stringify({ images }),
-    );
-  } catch {
-    // Quota exceeded — the scene still points at the image for this session.
-  }
-}
+import {
+  loadVideoImages,
+  writeVideoImages,
+  type ImagePool,
+} from "@/lib/video-image-store";
 
 /**
  * The video tool used to mount inside the manuscript editor and receive the
  * book data as props. Now it is its own route: it reads the same persisted
  * store (book-studio-projects) that the editor keeps in sync, so edits made in
  * /manuscript-editor show up here — without loading the editor bundle at all.
+ *
+ * The text still comes from the manuscript, but the images no longer do. Both
+ * studios used to share one image pool, which meant an image dropped on a scene
+ * card also appeared in the manuscript gallery, and clearing images in the
+ * manuscript orphaned every saved scene. This route now owns its pool, seeded
+ * once from the old shared key; see lib/video-image-store.ts.
  */
 export default function VideoEditorPage() {
   const [state, setState] = useState<{
     bookTitle: string;
     chapters: Chapter[];
     sourceMarkdown: string;
-    images: Record<string, string>;
+    images: ImagePool;
+    /** Non-null only on the load that seeded the pool from the manuscript. */
+    migration: { seeded: boolean; persisted: boolean } | null;
   } | null>(null);
 
   useEffect(() => {
@@ -65,20 +63,11 @@ export default function VideoEditorPage() {
       // Corrupt store: fall back to an empty promo project.
     }
 
-    let images: Record<string, string> = {};
-    try {
-      const rawImages = window.localStorage.getItem("markdown-converter-images");
-      if (rawImages) {
-        const parsed = JSON.parse(rawImages) as { images?: Record<string, string> };
-        if (parsed.images && typeof parsed.images === "object") images = parsed.images;
-      }
-    } catch {
-      // Non-critical.
-    }
+    const { images, migration } = loadVideoImages();
 
     // Deferred one tick so the effect does not setState synchronously.
     const t = window.setTimeout(() => {
-      setState({ bookTitle, chapters, sourceMarkdown, images });
+      setState({ bookTitle, chapters, sourceMarkdown, images, migration });
     }, 0);
     return () => window.clearTimeout(t);
   }, []);
@@ -89,7 +78,7 @@ export default function VideoEditorPage() {
         if (!prev) return prev;
         const images = { ...prev.images, [image.key]: image.dataUrl };
         if (image.aliasKey) images[image.aliasKey] = image.dataUrl;
-        persistImages(images);
+        writeVideoImages(images);
         return { ...prev, images };
       });
     },
@@ -104,7 +93,7 @@ export default function VideoEditorPage() {
       // and rewriting the whole pool per frame is both slow and quota-hungry.
       const images = { ...prev.images };
       for (const { key, dataUrl } of incoming) images[key] = dataUrl;
-      persistImages(images);
+      writeVideoImages(images);
       return { ...prev, images };
     });
   }, []);
@@ -114,12 +103,28 @@ export default function VideoEditorPage() {
       <StudioHeader />
       <div className="flex min-h-0 flex-1 flex-col">
         {state ? (
-          <VideoStudio
-            chapters={state.chapters}
-            images={state.images}
-      onAddImage={addImage}
-      onAddImages={addImages}
-      />
+          <>
+            {state.migration && !state.migration.persisted ? (
+              // The pool was seeded but the copy did not stick, so a reload
+              // would lose the pictures the saved scenes point at. Only this
+              // case is worth interrupting for: a migration that succeeded is
+              // the expected path and stays silent.
+              <p
+                role="status"
+                className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-200"
+              >
+                Your video images were copied from the manuscript studio, but
+                browser storage is full, so that copy will not survive a reload.
+                Re-add the images or free up some space.
+              </p>
+            ) : null}
+            <VideoStudio
+              chapters={state.chapters}
+              images={state.images}
+              onAddImage={addImage}
+              onAddImages={addImages}
+            />
+          </>
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             Loading book data…

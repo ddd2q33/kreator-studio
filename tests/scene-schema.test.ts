@@ -3,13 +3,13 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_BRAND,
-  DEFAULT_VOICE_ID,
   SCENE_FORMAT_VERSION,
   normalizeFirstScene,
   normalizeScene,
+  normalizeSceneAudio,
   normalizeSceneDocument,
+  normalizeSceneInput,
   normalizeScenes,
-  normalizeVoiceConfig,
 } from "../lib/scene-schema.ts";
 
 /** Deterministic id factory so ids can be asserted without stubbing Date/Math. */
@@ -20,49 +20,100 @@ const resetIds = () => {
   counter = 0;
 };
 
-describe("normalizeVoiceConfig", () => {
-  it("falls back to defaults for missing or non-object input", () => {
-    for (const input of [undefined, null, 42, "voice", []]) {
-      const { voice, warnings } = normalizeVoiceConfig(input);
-      assert.equal(voice.voiceId, DEFAULT_VOICE_ID);
+describe("normalizeSceneAudio", () => {
+  it("treats missing, empty or non-object input as no audio", () => {
+    for (const input of [undefined, null, 42, "clip", [], {}, { key: "  " }]) {
+      const { audio, warnings } = normalizeSceneAudio(input);
+      assert.equal(audio, null);
       assert.equal(warnings.length, 0);
     }
   });
 
-  it("clamps the 0-1 sliders instead of trusting the file", () => {
-    const { voice } = normalizeVoiceConfig({
-      voiceId: "custom",
-      stability: 5,
-      similarity: -2,
-      style: 0.42,
+  it("keeps a descriptor and rounds its numbers", () => {
+    const { audio, warnings } = normalizeSceneAudio({
+      key: "clip-1",
+      name: "vo.wav",
+      duration: 7.126,
+      bytes: 1234.6,
+      type: "audio/wav",
     });
-    assert.equal(voice.voiceId, "custom");
-    assert.equal(voice.stability, 1);
-    assert.equal(voice.similarity, 0);
-    assert.equal(voice.style, 0.42);
+    assert.deepEqual(audio, {
+      key: "clip-1",
+      name: "vo.wav",
+      duration: 7.13,
+      bytes: 1235,
+      type: "audio/wav",
+      regions: [],
+    });
+    assert.equal(warnings.length, 0);
   });
 
-  it("rejects unknown models and says so", () => {
-    const { voice, warnings } = normalizeVoiceConfig({ modelId: "gpt-4" });
-    assert.equal(voice.modelId, "eleven_multilingual_v2");
-    assert.match(warnings.join(" "), /unknown ElevenLabs model "gpt-4"/);
+  it("keeps measured speech regions and rounds them", () => {
+    const { audio } = normalizeSceneAudio({
+      key: "clip-r",
+      regions: [
+        { start: 0, end: 2.456 },
+        { start: 2.9, end: 5 },
+      ],
+    });
+    assert.deepEqual(audio?.regions, [
+      { start: 0, end: 2.46 },
+      { start: 2.9, end: 5 },
+    ]);
   });
 
-  it("keeps every known model id", () => {
-    for (const modelId of [
-      "eleven_multilingual_v2",
-      "eleven_flash_v2_5",
-      "eleven_turbo_v2_5",
-    ]) {
-      const { voice, warnings } = normalizeVoiceConfig({ modelId });
-      assert.equal(voice.modelId, modelId);
-      assert.equal(warnings.length, 0);
-    }
+  it("drops regions that would break the word aligner", () => {
+    const { audio } = normalizeSceneAudio({
+      key: "clip-bad",
+      regions: [
+        { start: 1, end: 1 },      // zero length
+        { start: 2, end: 1 },      // reversed
+        "nope",                     // not a region at all
+        { start: 4, end: 6 },
+        { start: 5, end: 7 },      // overlaps the previous one
+        { start: 8, end: 9 },
+      ],
+    });
+    assert.deepEqual(audio?.regions, [
+      { start: 4, end: 6 },
+      { start: 8, end: 9 },
+    ]);
   });
 
-  it("treats a blank voice id as absent", () => {
-    const { voice } = normalizeVoiceConfig({ voiceId: "   " });
-    assert.equal(voice.voiceId, DEFAULT_VOICE_ID);
+  it("fills in a name and type when the file did not report them", () => {
+    const { audio } = normalizeSceneAudio({ key: "clip-2" });
+    assert.equal(audio?.name, "clip-2");
+    assert.equal(audio?.type, "audio/mpeg");
+    assert.equal(audio?.duration, 0);
+    assert.equal(audio?.bytes, 0);
+  });
+
+  it("never lets a negative or non-numeric length through", () => {
+    const { audio } = normalizeSceneAudio({
+      key: "clip-3",
+      duration: -5,
+      bytes: "not a number",
+    });
+    assert.equal(audio?.duration, 0);
+    assert.equal(audio?.bytes, 0);
+  });
+
+  it("clears a clip the browser no longer holds, and says so", () => {
+    const { audio, warnings } = normalizeSceneAudio(
+      { key: "clip-gone", duration: 3 },
+      { audioKeys: ["clip-1", "clip-2"] },
+    );
+    assert.equal(audio, null);
+    assert.match(warnings.join(" "), /no longer in browser storage/);
+  });
+
+  it("keeps a clip that is present in storage", () => {
+    const { audio, warnings } = normalizeSceneAudio(
+      { key: "clip-1", duration: 3 },
+      { audioKeys: ["clip-1"] },
+    );
+    assert.equal(audio?.key, "clip-1");
+    assert.equal(warnings.length, 0);
   });
 });
 
@@ -80,7 +131,7 @@ describe("normalizeScene", () => {
     assert.equal(scene.chapterId, null);
     assert.equal(scene.duration, 4);
     assert.equal(scene.transition, "fade");
-    assert.equal(scene.voice.voiceId, DEFAULT_VOICE_ID);
+    assert.equal(scene.audio, null);
     assert.equal(warnings.length, 0);
   });
 
@@ -201,6 +252,79 @@ describe("normalizeScene", () => {
     assert.equal(unchecked.scene?.imageKey, "whatever.png");
   });
 
+  it("defaults imageFit, volume and mute for a scene that omits them", () => {
+    // This is the path every project saved before these fields existed takes on
+    // reload, so the defaults are what keeps an old project looking unchanged.
+    const scene = normalizeScene({ title: "A" }, 0, { newId }).scene;
+    assert.equal(scene?.imageFit, "contain");
+    assert.equal(scene?.volume, 1);
+    assert.equal(scene?.muted, false);
+  });
+
+  it("keeps a known imageFit and rejects an unknown one", () => {
+    assert.equal(
+      normalizeScene({ title: "A", imageFit: "cover" }, 0, { newId }).scene?.imageFit,
+      "cover",
+    );
+    assert.equal(
+      normalizeScene({ title: "A", imageFit: "stretch" }, 0, { newId }).scene?.imageFit,
+      "contain",
+    );
+  });
+
+  it("clamps a volume outside 0..1 rather than rejecting the scene", () => {
+    assert.equal(normalizeScene({ title: "A", volume: 3 }, 0, { newId }).scene?.volume, 1);
+    assert.equal(normalizeScene({ title: "A", volume: -1 }, 0, { newId }).scene?.volume, 0);
+    assert.equal(
+      normalizeScene({ title: "A", volume: "0.5" }, 0, { newId }).scene?.volume,
+      0.5,
+    );
+  });
+
+  it("reads mute from a boolean true only", () => {
+    assert.equal(normalizeScene({ title: "A", muted: true }, 0, { newId }).scene?.muted, true);
+    assert.equal(normalizeScene({ title: "A", muted: "yes" }, 0, { newId }).scene?.muted, false);
+  });
+
+  it("passes a group's imageFit, volume and mute down to its subscenes", () => {
+    const { scenes } = normalizeScenes(
+      [
+        {
+          scene: "Section",
+          imageFit: "cover",
+          volume: 0.5,
+          muted: true,
+          subscenes: [{ title: "one" }, { title: "two" }],
+        },
+      ],
+      { newId },
+    );
+    assert.equal(scenes.length, 2);
+    for (const scene of scenes) {
+      assert.equal(scene.imageFit, "cover");
+      assert.equal(scene.volume, 0.5);
+      assert.equal(scene.muted, true);
+    }
+  });
+
+  it("lets a subscene override the group's imageFit and volume", () => {
+    const { scenes } = normalizeScenes(
+      [
+        {
+          scene: "Section",
+          imageFit: "cover",
+          volume: 0.5,
+          subscenes: [{ title: "one" }, { title: "two", imageFit: "fill", volume: 1 }],
+        },
+      ],
+      { newId },
+    );
+    assert.equal(scenes[0]?.imageFit, "cover");
+    assert.equal(scenes[0]?.volume, 0.5);
+    assert.equal(scenes[1]?.imageFit, "fill");
+    assert.equal(scenes[1]?.volume, 1);
+  });
+
   it("treats an empty imageKey as null", () => {
     const { scene } = normalizeScene({ title: "A", imageKey: "  " }, 0, {
       newId,
@@ -228,13 +352,13 @@ describe("normalizeScene", () => {
     assert.equal(warnings.length, 0);
   });
 
-  it("warns when narration exceeds the TTS limit", () => {
+  it("warns when narration is unusually long", () => {
     const { warnings } = normalizeScene(
       { title: "A", narration: "x".repeat(5001) },
       0,
       { newId },
     );
-    assert.match(warnings.join(" "), /over 5000/);
+    assert.match(warnings.join(" "), /trimmed to 5000/);
   });
 
   it("survives a non-object scene", () => {
@@ -332,12 +456,12 @@ describe("normalizeSceneDocument", () => {
           imageKey: null,
           duration: 6.25,
           transition: "zoom",
-          voice: {
-            voiceId: "EXAVITQu4vr4xnSDxMaL",
-            modelId: "eleven_flash_v2_5",
-            stability: 0.25,
-            similarity: 0.9,
-            style: 0,
+          audio: {
+            key: "clip-rt",
+            name: "vo.wav",
+            duration: 6.25,
+            bytes: 2048,
+            type: "audio/wav",
           },
         },
       ],
@@ -387,6 +511,235 @@ describe("normalizeSceneDocument", () => {
     const { document, warnings } = normalizeSceneDocument({ scenes: [] });
     assert.equal(document, null);
     assert.match(warnings.join(" "), /not an array|No usable scenes/);
+  });
+});
+
+describe("normalizeSceneInput", () => {
+  it("reads an object with a scenes array as a whole document", () => {
+    // The bug this guards: wrapping a pasted document as one scene made the
+    // top-level `scenes` key an unknown field, so a 32-scene episode collapsed
+    // into a single blank frame.
+    resetIds();
+    const { document, warnings } = normalizeSceneInput({
+      episode: "An episode",
+      scenes: [
+        { scene: "One", subscenes: [{ narration: "a" }, { narration: "b" }] },
+        { scene: "Two", subscenes: [{ narration: "c" }] },
+      ],
+    });
+    assert.deepEqual(warnings, []);
+    assert.equal(document?.scenes.length, 3);
+  });
+
+  it("reads any other object as a single scene", () => {
+    const { document, warnings } = normalizeSceneInput({
+      title: "Just one",
+      duration: 5,
+    });
+    assert.deepEqual(warnings, []);
+    assert.equal(document?.scenes.length, 1);
+    assert.equal(document?.scenes[0]?.title, "Just one");
+    assert.equal(document?.scenes[0]?.duration, 5);
+  });
+
+  it("reads a grouped object as one section", () => {
+    const { document, warnings } = normalizeSceneInput({
+      scene: "A section",
+      subscenes: [{ narration: "a" }, { narration: "b" }],
+    });
+    assert.deepEqual(warnings, []);
+    assert.equal(document?.scenes.length, 2);
+  });
+
+  it("rejects a bare array with a message that says what to do", () => {
+    const { document, warnings } = normalizeSceneInput([{ title: "A" }]);
+    assert.equal(document, null);
+    assert.match(warnings.join(" "), /not a bare array/);
+  });
+
+  it("rejects a primitive", () => {
+    for (const input of [null, 7, "text", true]) {
+      const { document, warnings } = normalizeSceneInput(input);
+      assert.equal(document, null);
+      assert.match(warnings.join(" "), /must be a JSON object/);
+    }
+  });
+});
+
+describe("grouped scene documents", () => {
+  it("expands one object with subscenes into a whole run", () => {
+    resetIds();
+    const { document, warnings } = normalizeSceneDocument({
+      scenes: [
+        {
+          scene: "The Silence",
+          subscenes: [
+            { narration: "one", duration: 2 },
+            { narration: "two", duration: 3 },
+            { narration: "three", duration: 6 },
+          ],
+        },
+      ],
+    });
+    assert.equal(document?.scenes.length, 3);
+    assert.deepEqual(
+      document?.scenes.map((s) => s.group),
+      ["The Silence", "The Silence", "The Silence"],
+    );
+    assert.deepEqual(
+      document?.scenes.map((s) => s.duration),
+      [2, 3, 6],
+    );
+    assert.deepEqual(warnings, []);
+  });
+
+  it("does not warn about the missing subscene titles", () => {
+    // A grouped subscene is titled blank by design: the section header carries
+    // the name. Warning about each one buried the warnings that do matter.
+    const { document, warnings } = normalizeSceneDocument({
+      scenes: [
+        {
+          scene: "The Silence",
+          subscenes: [{ narration: "one" }, { narration: "two" }],
+        },
+      ],
+    });
+    assert.equal(document?.scenes.length, 2);
+    assert.deepEqual(warnings, []);
+  });
+
+  it("gives every subscene a distinct id", () => {
+    resetIds();
+    const { document } = normalizeSceneDocument(
+      {
+        scenes: [
+          {
+            scene: "The Silence",
+            subscenes: [{ narration: "one" }, { narration: "two" }],
+          },
+        ],
+      },
+      { newId },
+    );
+    const ids = document?.scenes.map((s) => s.id) ?? [];
+    assert.equal(new Set(ids).size, ids.length);
+  });
+
+  it("puts the section name on the first subscene so the header agrees with it", () => {
+    const { document } = normalizeSceneDocument({
+      scenes: [
+        {
+          scene: "The Silence",
+          subscenes: [{ narration: "one" }, { narration: "two" }],
+        },
+      ],
+    });
+    assert.equal(document?.scenes[0]?.title, "The Silence");
+    assert.equal(document?.scenes[1]?.title, "");
+  });
+
+  it("lets a subscene override the section and start its own run", () => {
+    const { document } = normalizeSceneDocument({
+      scenes: [
+        {
+          scene: "The Silence",
+          subscenes: [
+            { narration: "one" },
+            { group: "Aside", narration: "two" },
+            { narration: "three" },
+          ],
+        },
+      ],
+    });
+    assert.deepEqual(
+      document?.scenes.map((s) => s.group),
+      ["The Silence", "Aside", "The Silence"],
+    );
+  });
+
+  it("keeps a usable subscene when a sibling is not an object", () => {
+    const { document, warnings } = normalizeSceneDocument({
+      scenes: [
+        {
+          scene: "The Silence",
+          subscenes: [{ narration: "one" }, "junk", { narration: "two" }],
+        },
+      ],
+    });
+    assert.equal(document?.scenes.length, 2);
+    assert.match(warnings.join(" "), /is not an object/);
+  });
+
+  it("reports a group whose subscenes are all unusable", () => {
+    const { document, warnings } = normalizeSceneDocument({
+      scenes: [{ scene: "The Silence", subscenes: ["junk", 7] }],
+    });
+    assert.equal(document, null);
+    assert.match(warnings.join(" "), /no usable subscenes/);
+  });
+
+  it("falls back to a section name when the group has none", () => {
+    const { document } = normalizeSceneDocument({
+      scenes: [{ subscenes: [{ narration: "one" }] }],
+    });
+    assert.equal(document?.scenes[0]?.group, "Section 1");
+  });
+
+  it("expands an episode document of grouped sections", () => {
+    resetIds();
+    const { document, warnings } = normalizeSceneDocument({
+      episode: "She Thought She Was Too Needy",
+      scenes: [
+        {
+          scene: "The Silence",
+          subscenes: [
+            { narration: "She checked her phone again...", duration: 2 },
+            { narration: "But silence felt louder than words.", duration: 3 },
+          ],
+        },
+        {
+          scene: "The Message",
+          subscenes: [
+            { narration: "Then finally...", duration: 2 },
+            { narration: "A message appeared.", duration: 2 },
+            { narration: "Goodnight.", duration: 4 },
+          ],
+        },
+      ],
+    });
+    assert.equal(document?.scenes.length, 5);
+    assert.deepEqual(
+      document?.scenes.map((s) => s.group),
+      [
+        "The Silence",
+        "The Silence",
+        "The Message",
+        "The Message",
+        "The Message",
+      ],
+    );
+    // The episode title is not part of the scene model, so it is ignored
+    // quietly rather than reported as a problem with the file.
+    assert.deepEqual(warnings, []);
+  });
+
+  it("keeps section runs in document order", () => {
+    const { document } = normalizeSceneDocument({
+      episode: "Two acts",
+      scenes: [
+        { scene: "Act I", subscenes: [{ narration: "a" }] },
+        { scene: "Act II", subscenes: [{ narration: "b" }] },
+        { scene: "Act III", subscenes: [{ narration: "c" }] },
+      ],
+    });
+    assert.deepEqual(
+      document?.scenes.map((s) => s.group),
+      ["Act I", "Act II", "Act III"],
+    );
+    assert.deepEqual(
+      document?.scenes.map((s) => s.narration),
+      ["a", "b", "c"],
+    );
   });
 });
 
@@ -442,11 +795,13 @@ describe("normalizeFirstScene", () => {
       title: "A",
       duration: 99,
       transition: "dissolve",
-      voice: { stability: 9 },
+      audio: { key: "clip-x", duration: -3, bytes: "nope" },
     });
     assert.equal(scene?.duration, 20);
     assert.equal(scene?.transition, "fade");
-    assert.equal(scene?.voice.stability, 1);
+    assert.equal(scene?.audio?.key, "clip-x");
+    assert.equal(scene?.audio?.duration, 0);
+    assert.equal(scene?.audio?.bytes, 0);
     assert.match(warnings.join(" "), /clamped to 20s/);
   });
 

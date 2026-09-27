@@ -7,9 +7,12 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
+  useSyncExternalStore,
 } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { AssetLibrary } from "@/components/editor/asset-library";
+import type { Asset } from "@/lib/asset-library";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -20,24 +23,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ExportHub } from "@/components/editor/export-hub";
+import type { ExportTarget as ExportTargetSpec } from "@/components/editor/export-hub";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  BookMarked,
   BookOpen,
   ChevronDown,
   ChevronUp,
   Code2,
   Copy,
-  Download,
   Eye,
   Keyboard,
-  FileCode2,
-  FileDown,
   FilePlus,
   FileText,
   Folder,
@@ -53,7 +48,6 @@ import {
   MessageSquarePlus,
   Blocks,
   FolderOpen,
-  FolderDown,
   FolderUp,
   ListTree,
 } from "lucide-react";
@@ -120,6 +114,9 @@ const ACCENT_SWATCHES = [
 
 const STORAGE_KEY_TEXT = "markdown-converter-text";
 const STORAGE_KEY_IMAGES = "markdown-converter-images";
+
+/** The library categories a manuscript can actually use. */
+const LIBRARY_IMAGE_KINDS = ["image", "illustration", "logo", "icon"] as const;
 const STORAGE_KEY_CUSTOM = "markdown-converter-custom";
 
 type Chapter = { id: string; title: string; markdown: string };
@@ -277,6 +274,25 @@ function savePersisted(value: { text?: PersistedText; images?: ImageMap }): bool
   }
 }
 
+/**
+ * Preview <style> tag. Template CSS depends on state restored from
+ * localStorage (activeTemplate, custom variant), so it must not render during
+ * hydration: the server always paints the default while the client may restore
+ * a different template, which React reports as a hydration mismatch.
+ */
+const emptySubscribe = () => () => {};
+function ClientStyle({ css }: { css: string }) {
+  // False on the server and during hydration, true after — without a cascading
+  // setState inside an effect (the lint rule rejects that pattern).
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
+  if (!mounted) return null;
+  return <style>{css}</style>;
+}
+
 const JSON_EXAMPLE = JSON.stringify(
   {
     title: "The Healing Brain",
@@ -366,6 +382,24 @@ const JSON_EXAMPLE = JSON.stringify(
   2,
 );
 
+/**
+ * Selectors that force a page break in the printed preview.
+ *
+ * At module scope, not inside the component: as a component-local array it was
+ * a fresh value on every render, which the hooks lint reads as a dependency that
+ * changes constantly. A constant here is also the truth it looks like.
+ */
+const PAGE_BREAK_CSS = [
+  ".book-chapter",
+  ".part-page",
+  ".chapter-page",
+  ".copyright-page",
+  ".dedication",
+  ".restricted",
+  ".toc",
+  "h1:not(:first-child)",
+].join(", ");
+
 export default function MarkdownConverter() {
   const PAPER_SIZES = [
     { id: "none", label: "No fixed page", widthMm: 0, heightMm: 0 },
@@ -375,16 +409,6 @@ export default function MarkdownConverter() {
     { id: "a5", label: "A5", widthMm: 148, heightMm: 210 },
   ];
   const toPx = (mm: number) => Math.round((mm / 25.4) * 96);
-  const PAGE_BREAK_CSS = [
-    ".book-chapter",
-    ".part-page",
-    ".chapter-page",
-    ".copyright-page",
-    ".dedication",
-    ".restricted",
-    ".toc",
-    "h1:not(:first-child)",
-  ].join(", ");
   const defaultTemplate = TEMPLATES[0];
   const [activeTemplate, setActiveTemplate] = useState(defaultTemplate.id);
   const [markdown, setMarkdown] = useState(defaultTemplate.content);
@@ -407,6 +431,7 @@ export default function MarkdownConverter() {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [images, setImages] = useState<ImageMap>({});
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [autoSaved, setAutoSaved] = useState(false);
   const lastSourceRef = useRef(markdown);
@@ -690,6 +715,24 @@ export default function MarkdownConverter() {
     rules.push("}");
     return rules.join("\n");
   }, [custom]);
+
+  // Full CSS for the preview <style> tag (see ClientStyle).
+  const previewStyleCss = useMemo(
+    () =>
+      (getTemplate(activeTemplate)?.style ?? "") +
+      themeOverrideCss +
+      (paperMode !== "none"
+        ? `
+            .paper-preview .${PAGE_BREAK_CSS.replace(/,\s*/g, ", .paper-preview ")} {
+              break-before: page;
+            }
+            .paper-preview::before {
+              content: attr(data-page-label);
+            }
+          `
+        : ""),
+    [activeTemplate, themeOverrideCss, paperMode],
+  );
 
   // Markdown → HTML pipeline shared by the preview, the compiled book, every
   // export and the headless API/CLI via lib/render-engine.ts.
@@ -1107,6 +1150,39 @@ export default function MarkdownConverter() {
           `Embedded ${imgFiles.length} images. Click a thumbnail below to insert it.`,
         );
       }
+    },
+    [images, insertImageReference],
+  );
+
+  /**
+   * Puts a library picture into the manuscript's own pool and references it.
+   *
+   * The library is not the document's image source: the pool stays exactly what
+   * it was, and a library pick is just another way to fill it. That keeps the
+   * "clear images" button from touching assets the author never chose, which is
+   * the bug `video-image-store` was written to escape.
+   */
+  const useLibraryImage = useCallback(
+    async (file: File, asset: Asset) => {
+      const dataUrl = await fileToDataURL(file);
+      if (!dataUrl) {
+        toast.error(`Could not read "${asset.name}".`);
+        return;
+      }
+      // The pool is keyed by name, so a name already in use has to be stepped
+      // over or this would silently replace an image the document relies on.
+      const dot = asset.name.lastIndexOf(".");
+      const stem = (dot > 0 ? asset.name.slice(0, dot) : asset.name).toLowerCase();
+      const ext = dot > 0 ? asset.name.slice(dot) : "";
+      let key = `${stem}${ext}`;
+      let n = 2;
+      while (images[key]) {
+        key = `${stem}-${n}${ext}`;
+        n += 1;
+      }
+      setImages((prev) => ({ ...prev, [key]: dataUrl }));
+      insertImageReference(key);
+      toast.success(`Inserted "${key}" from the library.`);
     },
     [images, insertImageReference],
   );
@@ -1695,6 +1771,69 @@ export default function MarkdownConverter() {
     ? (chapters[activeChapter]?.title ?? currentProject.name)
     : "Document";
 
+  /**
+   * Everything this editor can export, described once for the shared hub.
+   *
+   * The video studio renders the same control from the same shape, so "Export"
+   * means one thing across the app: pick a format, read what it contains, run
+   * it. PDF is the only target that can fail for a reason the user can act on -
+   * the headless print service - so it is the only one that carries a reason.
+   */
+  const exportTargets = useMemo<ExportTargetSpec[]>(
+    () => [
+      {
+        id: "docx",
+        label: "Word document",
+        extension: "docx",
+        hint: "The styled document, editable in Word",
+        run: downloadDocx,
+      },
+      {
+        id: "pdf",
+        label: "PDF",
+        extension: "pdf",
+        hint: "Print-ready pages, generated by the server",
+        run: downloadPdf,
+      },
+      {
+        id: "epub",
+        label: "EPUB",
+        extension: "epub",
+        hint: "Reflowable ebook for e-readers",
+        run: downloadEpub,
+      },
+      {
+        id: "html",
+        label: "Web page",
+        extension: "html",
+        hint: "A single self-contained .html file",
+        run: downloadHtml,
+      },
+      {
+        id: "md",
+        label: "Markdown",
+        extension: "md",
+        hint: "The plain source, as written",
+        run: downloadMarkdown,
+      },
+      {
+        id: "zip",
+        label: "Chapters bundle",
+        extension: "zip",
+        hint: "Every chapter as its own Markdown file",
+        run: downloadBookZip,
+      },
+    ],
+    [
+      downloadDocx,
+      downloadPdf,
+      downloadEpub,
+      downloadHtml,
+      downloadMarkdown,
+      downloadBookZip,
+    ],
+  );
+
   return (
     <div
       className="relative flex h-full flex-col overflow-hidden"
@@ -1796,6 +1935,10 @@ export default function MarkdownConverter() {
               />
             </label>
           </Button>
+          <Button size="sm" variant="outline" onClick={() => setLibraryOpen(true)}>
+            <Library />
+            Library
+          </Button>
           <Button size="sm" variant="outline" asChild>
             <label>
               <Folder />
@@ -1863,49 +2006,7 @@ export default function MarkdownConverter() {
 
         <Separator orientation="vertical" className="h-5" />
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="default" title="Export the book">
-              {isExportingDocx || isExportingPdf || isExportingEpub || isExportingZip ? (
-                <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              ) : (
-                <Download />
-              )}
-              Export
-              <ChevronDown className="size-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem onClick={downloadDocx} disabled={isExportingDocx}>
-              <Download />
-              DOCX
-              {isExportingDocx && <span className="ml-auto text-xs text-muted-foreground">Exporting…</span>}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={downloadPdf} disabled={isExportingPdf}>
-              <FileText />
-              PDF
-              {isExportingPdf && <span className="ml-auto text-xs text-muted-foreground">Printing…</span>}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={downloadEpub} disabled={isExportingEpub}>
-              <BookMarked />
-              EPUB
-              {isExportingEpub && <span className="ml-auto text-xs text-muted-foreground">Exporting…</span>}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={downloadMarkdown}>
-              <FileDown />
-              Markdown
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={downloadHtml}>
-              <FileCode2 />
-              HTML
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={downloadBookZip} disabled={isExportingZip}>
-              <FolderDown />
-              Chapters .zip
-              {isExportingZip && <span className="ml-auto text-xs text-muted-foreground">Zipping…</span>}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <ExportHub targets={exportTargets} defaultId="docx" />
 
         <Separator orientation="vertical" className="h-5" />
 
@@ -2543,18 +2644,8 @@ export default function MarkdownConverter() {
               value="preview"
               className="min-h-0 flex-1 overflow-auto bg-background p-4"
             >
-              <style>
-                {(getTemplate(activeTemplate)?.style ?? "") + themeOverrideCss}
-                {paperMode !== "none" &&
-                  `
-            .paper-preview .${PAGE_BREAK_CSS.replace(/,\s*/g, ", .paper-preview ")} {
-              break-before: page;
-            }
-            .paper-preview::before {
-              content: attr(data-page-label);
-            }
-          `}
-              </style>
+              <ClientStyle css={previewStyleCss} />
+
               <div
                 ref={paperRef}
                 className={
@@ -2688,6 +2779,15 @@ export default function MarkdownConverter() {
             </div>
           </div>
         </div>
+      )}
+      {libraryOpen && (
+        <AssetLibrary
+          onClose={() => setLibraryOpen(false)}
+          onUse={useLibraryImage}
+          // A document can only carry pictures: there is nowhere for a clip or
+          // a video to go, so offering them would be a dead button.
+          kinds={LIBRARY_IMAGE_KINDS}
+        />
       )}
     </div>
   );

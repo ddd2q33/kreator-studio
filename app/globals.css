@@ -511,3 +511,22 @@
   background: #34d399;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
 }
+
+/* The preview stage while it owns the whole screen. The canvas already scales
+   off its own intrinsic size, so it only needs a black backdrop and room to
+   grow; the docked layout's min-height chain would otherwise cap it. */
+.video-fullscreen:fullscreen,
+.video-fullscreen:-webkit-full-screen {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  background: #09090b; /* zinc-950 */
+  overflow: hidden;
+}
+
+.video-fullscreen:fullscreen canvas,
+.video-fullscreen:-webkit-full-screen canvas {
+  max-width: 100%;
+  max-height: 100%;
+}

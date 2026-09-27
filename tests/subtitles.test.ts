@@ -2,16 +2,25 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  DEFAULT_SUBTITLE_STYLE_ID,
   MAX_CHARS_PER_CUE,
   MIN_CUE_SECONDS,
+  SUBTITLE_STYLES,
+  subtitleStyleById,
   buildTimelineCues,
   cueAt,
   cuesForScene,
   estimateCueSeconds,
+  estimateNarrationSeconds,
+  plainCue,
+  regionsFromWords,
   splitIntoCues,
   toSrt,
   toSrtTimestamp,
   wrapCue,
+  activeWordIndex,
+  cuesForSceneAligned,
+  lineIndexForWord,
 } from "../lib/subtitles.ts";
 
 describe("splitIntoCues", () => {
@@ -90,6 +99,56 @@ describe("estimateCueSeconds", () => {
     const short = estimateCueSeconds("una dos tres");
     const long = estimateCueSeconds("una dos tres cuatro cinco seis siete ocho");
     assert.ok(long > short);
+  });
+});
+
+describe("estimateNarrationSeconds", () => {
+  it("is zero for text with no words", () => {
+    // Not the one-second floor: a scene with no line keeps the length the
+    // author chose for pacing.
+    assert.equal(estimateNarrationSeconds(""), 0);
+    assert.equal(estimateNarrationSeconds("   "), 0);
+  });
+
+  it("is longer than the bare speaking time, for the pause at each edge", () => {
+    const words = "una dos tres cuatro cinco";
+    const bare = words.split(" ").length / 2.6;
+    assert.ok(estimateNarrationSeconds(words) > bare);
+  });
+
+  it("grows with the word count", () => {
+    const short = estimateNarrationSeconds("una dos tres");
+    const long = estimateNarrationSeconds("una dos tres cuatro cinco seis siete ocho");
+    assert.ok(long > short);
+  });
+
+  it("counts only words, so runs of spaces do not inflate it", () => {
+    assert.equal(
+      estimateNarrationSeconds("una  dos   tres"),
+      estimateNarrationSeconds("una dos tres"),
+    );
+  });
+
+  it("ignores leading and trailing space", () => {
+    assert.equal(
+      estimateNarrationSeconds("  hola mundo  "),
+      estimateNarrationSeconds("hola mundo"),
+    );
+  });
+
+  it("agrees with the subtitle estimate, so a sized scene holds its own captions", () => {
+    // The point of sharing the speaking rate: a scene sized by this function
+    // must be long enough for the cues built from the same words.
+    const text = "esta es una linea de narracion bastante larga para medir";
+    assert.ok(
+      estimateNarrationSeconds(text) > estimateCueSeconds(text),
+      "the scene must outlast the last cue",
+    );
+  });
+
+  it("rounds to hundredths so a slider lands on a clean value", () => {
+    const value = estimateNarrationSeconds("una dos tres cuatro cinco seis");
+    assert.equal(value, Math.round(value * 100) / 100);
   });
 });
 
@@ -208,8 +267,8 @@ describe("toSrtTimestamp", () => {
 describe("toSrt", () => {
   it("emits 1-based blocks with a blank line between them", () => {
     const srt = toSrt([
-      { lines: ["Hola"], start: 0, end: 1 },
-      { lines: ["Mundo"], start: 1, end: 2 },
+      plainCue(["Hola"], 0, 1),
+      plainCue(["Mundo"], 1, 2),
     ]);
     assert.equal(
       srt,
@@ -222,7 +281,200 @@ describe("toSrt", () => {
   });
 
   it("keeps a two-line cue on two lines", () => {
-    const srt = toSrt([{ lines: ["line one", "line two"], start: 0, end: 1 }]);
+    const srt = toSrt([plainCue(["line one", "line two"], 0, 1)]);
     assert.match(srt, /line one\nline two/);
+  });
+});
+
+describe("regionsFromWords", () => {
+  it("merges word runs into speech regions, skipping real gaps", () => {
+    const regions = regionsFromWords([
+      { start: 0.0, end: 0.5 },
+      { start: 0.55, end: 1.0 }, // breath: gap 0.05 < 0.18 → merged
+      { start: 2.0, end: 2.6 }, // real pause: gap 1.0 → new region
+    ]);
+    assert.deepEqual(regions, [
+      { start: 0, end: 1.0 },
+      { start: 2.0, end: 2.6 },
+    ]);
+  });
+
+  it("sorts unaligned input and drops invalid entries", () => {
+    const regions = regionsFromWords([
+      { start: 1, end: 2 },
+      { start: 0.2, end: 0.9 }, // unsorted on purpose
+      { start: NaN, end: 3 }, // invalid: dropped
+      { start: 0, end: 0 }, // zero-width: dropped
+    ]);
+    // The two valid words merge across the 0.1s breath.
+    assert.deepEqual(regions, [{ start: 0.2, end: 2 }]);
+  });
+
+  it("returns no regions from no words", () => {
+    assert.deepEqual(regionsFromWords([]), []);
+  });
+});
+
+describe("subtitle style templates", () => {
+  it("exposes six templates with unique ids and labels", () => {
+    assert.ok(SUBTITLE_STYLES.length >= 6);
+    const ids = new Set(SUBTITLE_STYLES.map((s) => s.id));
+    assert.equal(ids.size, SUBTITLE_STYLES.length);
+    for (const s of SUBTITLE_STYLES) {
+      assert.ok(s.label.length > 0);
+      assert.ok(["solid", "translucent", "none"].includes(s.plate));
+      assert.ok(s.sizeRatio > 0);
+      assert.ok(s.bottomRatio >= 0 && s.bottomRatio < 0.5);
+    }
+  });
+
+  it("falls back to the default for unknown or missing ids", () => {
+    assert.equal(subtitleStyleById("nope").id, DEFAULT_SUBTITLE_STYLE_ID);
+    assert.equal(subtitleStyleById(undefined).id, DEFAULT_SUBTITLE_STYLE_ID);
+    assert.equal(subtitleStyleById("tiktok").id, "tiktok");
+  });
+
+  it("keeps the default in the catalog", () => {
+    assert.ok(SUBTITLE_STYLES.some((s) => s.id === DEFAULT_SUBTITLE_STYLE_ID));
+  });
+});
+
+describe("aligned cues", () => {
+  const regions = [
+    { start: 0, end: 1 },
+    { start: 2, end: 3 },
+  ];
+
+  it("times every word when a scene has measured speech", () => {
+    const cues = cuesForSceneAligned("hola mundo entero", 0, regions);
+    assert.ok(cues.length > 0);
+    const words = cues.flatMap((c) => c.words.map((w) => w.text));
+    assert.deepEqual(words, ["hola", "mundo", "entero"]);
+  });
+
+  it("puts every word inside the scene and in order", () => {
+    const cues = cuesForSceneAligned("uno dos tres cuatro cinco", 0, regions);
+    let last = -1;
+    for (const cue of cues) {
+      for (const word of cue.words) {
+        assert.ok(word.start >= 0, `${word.text} starts before the scene`);
+        assert.ok(word.end <= 3 + 1e-9, `${word.text} runs past the speech`);
+        assert.ok(word.end >= word.start, `${word.text} is reversed`);
+        assert.ok(
+          word.start >= last,
+          `${word.text} starts before the word before it`,
+        );
+        last = word.start;
+      }
+    }
+  });
+
+  it("does not start a word inside a pause", () => {
+    const cues = cuesForSceneAligned("uno dos tres cuatro", 0, regions);
+    for (const cue of cues) {
+      for (const word of cue.words) {
+        const inGap = word.start > 1 && word.start < 2;
+        assert.equal(inGap, false, `${word.text} starts in the silence`);
+      }
+    }
+  });
+
+  it("shifts the whole cue by the scene offset", () => {
+    const [first] = cuesForSceneAligned("hola mundo", 10, regions);
+    assert.ok(first);
+    assert.ok(first.start >= 10, "cue should sit after the offset");
+  });
+
+  it("points every line start at a real word in that line", () => {
+    const cues = cuesForSceneAligned(
+      "palabra uno palabra dos palabra tres palabra cuatro",
+      0,
+      regions,
+    );
+    for (const cue of cues) {
+      assert.equal(cue.lineStarts.length, cue.lines.length);
+      let previous = -1;
+      for (const start of cue.lineStarts) {
+        assert.ok(
+          start >= 0 && start < cue.words.length,
+          `line start ${start} is outside the cue`,
+        );
+        assert.ok(start > previous, "line starts must advance");
+        previous = start;
+      }
+    }
+  });
+
+  it("returns nothing without words or without regions", () => {
+    assert.deepEqual(cuesForSceneAligned("", 0, regions), []);
+    assert.deepEqual(cuesForSceneAligned("hola", 0, []), []);
+  });
+});
+
+describe("activeWordIndex", () => {
+  const cue = {
+    lines: ["uno dos tres"],
+    start: 0,
+    end: 3,
+    lineStarts: [0],
+    words: [
+      { text: "uno", start: 0, end: 1 },
+      { text: "dos", start: 1, end: 2 },
+      { text: "tres", start: 2, end: 3 },
+    ],
+  };
+
+  it("follows the clock through the cue", () => {
+    assert.equal(activeWordIndex(cue, 0.5), 0);
+    assert.equal(activeWordIndex(cue, 1.5), 1);
+    assert.equal(activeWordIndex(cue, 2.5), 2);
+  });
+
+  it("holds a word through a pause instead of flickering", () => {
+    // A word counts until the next one starts, so a silence right after it
+    // must not switch the highlight off and on.
+    assert.equal(activeWordIndex(cue, 0.99), 0);
+    assert.equal(activeWordIndex(cue, 1.0), 1);
+  });
+
+  it("reports -1 before the cue and after the last word", () => {
+    assert.equal(activeWordIndex(cue, -1), -1);
+    assert.equal(activeWordIndex(cue, 99), 2);
+  });
+
+  it("returns -1 for a cue with no word timings", () => {
+    assert.equal(activeWordIndex(plainCue(["hola"], 0, 1), 0.5), -1);
+  });
+
+  it("can resume from a known position", () => {
+    // The painter keeps the previous index so a long caption is not rescanned
+    // on every frame.
+    assert.equal(activeWordIndex(cue, 2.5, 2), 2);
+    assert.equal(activeWordIndex(cue, 0.5, 2), 0);
+  });
+});
+
+describe("lineIndexForWord", () => {
+  it("maps a word to the line it was painted on", () => {
+    const cue = {
+      lines: ["uno dos", "tres cuatro"],
+      start: 0,
+      end: 4,
+      words: [
+        { text: "uno", start: 0, end: 1 },
+        { text: "dos", start: 1, end: 2 },
+        { text: "tres", start: 2, end: 3 },
+        { text: "cuatro", start: 3, end: 4 },
+      ],
+      lineStarts: [0, 2],
+    };
+    assert.equal(lineIndexForWord(cue, 0), 0);
+    assert.equal(lineIndexForWord(cue, 1), 0);
+    assert.equal(lineIndexForWord(cue, 2), 1);
+    assert.equal(lineIndexForWord(cue, 3), 1);
+  });
+
+  it("returns -1 for a word outside the cue or a cue with no line data", () => {
+    assert.equal(lineIndexForWord(plainCue(["hola"], 0, 1), 0), -1);
   });
 });
