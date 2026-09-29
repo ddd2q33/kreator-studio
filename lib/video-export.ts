@@ -23,7 +23,6 @@ import {
   CanvasSource,
   Mp4OutputFormat,
   Output,
-  Quality,
   WebMOutputFormat,
   canEncodeAudio,
   canEncodeVideo,
@@ -42,12 +41,27 @@ export const EXPORT_FPS = 30;
  * Roughly 0.1 bits per pixel per frame, which lands near 8 Mbps for 1080p30.
  * That is generous for flat graphic slides and subtitles, which is what this
  * editor renders, and a still frame costs almost nothing to encode anyway.
+ *
+ * Passed as a plain number rather than wrapped in `Quality`. `Quality` takes a
+ * qualitative *level* in its constructor, not a bitrate, so wrapping a bitrate in
+ * it produced a config with no bitrate at all - the encoder was then told
+ * "quantizer 0", which is the highest quality a codec can be asked for, and every
+ * export came out far larger than this file's comment claimed.
  */
 const bitsPerPixelPerFrame = 0.1;
 
 function videoBitrate(width: number, height: number, fps: number): number {
   return Math.round(width * height * fps * bitsPerPixelPerFrame);
 }
+
+/**
+ * Audio bitrate target, in bits per second.
+ *
+ * 128 kbps, which is a normal target for speech. The audio track here is
+ * narration over a flat graphic, never music, so anything higher would be spent
+ * on information the picture does not contain.
+ */
+const audioBitrate = 128_000;
 
 export type RenderVideoOptions = {
   target: ExportTarget;
@@ -156,36 +170,51 @@ export async function renderVideoToFile(
     );
   }
 
-  // Audio is worth keeping, but not worth failing the whole export over: a
-  // silent .mp4 still opens everywhere, so a missing encoder drops the track.
-  let includeAudio = options.audio !== null;
-  if (includeAudio) {
-    const encodable = await canEncodeAudio(audioCodec);
-    if (!encodable) includeAudio = false;
-  }
-
-  const outputFormat =
-    format.id === "mp4" ? new Mp4OutputFormat() : new WebMOutputFormat();
-  const output = new Output({
-    format: outputFormat,
-    target: new BufferTarget(),
-  });
-
-  const videoSource = new CanvasSource(options.canvas, {
-    codec: videoCodec,
-    bitrate: new Quality(videoBitrate(width, height, fps)),
-  });
-  output.addVideoTrack(videoSource);
-
-  let audioSource: AudioBufferSource | null = null;
-  if (includeAudio && options.audio) {
-    audioSource = new AudioBufferSource({ codec: audioCodec });
-    output.addAudioTrack(audioSource);
-  }
-
-  await output.start();
-
+  // Everything that can still go wrong is inside this one try, including the
+  // setup. It used to wrap only the frame loop, which meant a failure while
+  // building the output - an audio encoder that throws when asked, a source the
+  // container rejects - escaped as a raw exception and reached the UI as "the
+  // export failed for an unknown reason", with the actual cause thrown away. The
+  // audio half is where that happens: a project with no voice-over never touches
+  // the audio encoder at all, so the bug only ever appeared on the projects that
+  // had one.
+  let started = false;
+  let output: Output | null = null;
   try {
+    // Audio is worth keeping, but not worth failing the whole export over: a
+    // silent .mp4 still opens everywhere, so a missing encoder drops the track.
+    let includeAudio = options.audio !== null;
+    if (includeAudio) {
+      const encodable = await canEncodeAudio(audioCodec);
+      if (!encodable) includeAudio = false;
+    }
+
+    const outputFormat =
+      format.id === "mp4" ? new Mp4OutputFormat() : new WebMOutputFormat();
+    output = new Output({
+      format: outputFormat,
+      target: new BufferTarget(),
+    });
+
+    const videoSource = new CanvasSource(options.canvas, {
+      codec: videoCodec,
+      bitrate: videoBitrate(width, height, fps),
+    });
+    output.addVideoTrack(videoSource);
+
+    let audioSource: AudioBufferSource | null = null;
+    if (includeAudio && options.audio) {
+      // The bitrate is required, not optional. A compressed audio codec with no
+      // target is rejected with "config.quality must be provided", a refusal that
+      // only ever happens on a project that has audio - so it read as "exporting
+      // with sound is broken" rather than as a missing argument.
+      audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: audioBitrate });
+      output.addAudioTrack(audioSource);
+    }
+
+    await output.start();
+    started = true;
+
     if (audioSource && options.audio) {
       // Added before the frames: the encoder needs to know the track exists
       // while the output is open, and one contiguous buffer needs no scheduling.
@@ -200,28 +229,29 @@ export async function renderVideoToFile(
       await videoSource.add(time, frameDuration);
       options.onProgress?.((i + 1) / totalFrames);
     }
+
+    // finalize() resolves with nothing; the container's own mime type is the one
+    // to label the file with, and it matches what was actually written.
+    await output.finalize();
+    const buffer = (output.target as BufferTarget).buffer;
+    if (!buffer) {
+      throw new VideoExportError("The export produced no data.");
+    }
+
+    return {
+      blob: new Blob([buffer], { type: outputFormat.mimeType }),
+      extension: format.extension,
+      audioDropped: options.audio !== null && !includeAudio,
+    };
   } catch (error) {
-    // Leaves the output in a clean state so the encoder resources are released
-    // instead of lingering after a failed export.
-    await output.cancel().catch(() => {});
+    // Cancelling releases the encoder resources instead of leaving them alive
+    // after a failed export. Only safe once the output exists, and pointless
+    // once it has been finalized, so both are checked rather than assumed.
+    if (output && started) await output.cancel().catch(() => {});
     throw new VideoExportError(
       error instanceof Error
         ? `The export failed: ${error.message}`
         : "The export failed for an unknown reason.",
     );
   }
-
-  // finalize() resolves with nothing; the container's own mime type is the one
-  // to label the file with, and it matches what was actually written.
-  await output.finalize();
-  const buffer = (output.target as BufferTarget).buffer;
-  if (!buffer) {
-    throw new VideoExportError("The export produced no data.");
-  }
-
-  return {
-    blob: new Blob([buffer], { type: outputFormat.mimeType }),
-    extension: format.extension,
-    audioDropped: options.audio !== null && !includeAudio,
-  };
 }

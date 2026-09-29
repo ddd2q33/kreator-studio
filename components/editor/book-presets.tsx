@@ -1,6 +1,14 @@
 "use client";
 
-import { GraduationCap, BookHeart, Cpu, Library, HeartPulse, ShieldCheck } from "lucide-react";
+import {
+  GraduationCap,
+  BookHeart,
+  Cpu,
+  Library,
+  HeartPulse,
+  ShieldCheck,
+  Stethoscope,
+} from "lucide-react";
 import type { CustomVariant } from "@/lib/projects";
 
 export type BookPreset = {
@@ -151,6 +159,41 @@ A quick reflective note.
 **Journal Space:**
 What did you notice?
 ___
+:::
+`,
+  },
+  {
+    id: "medical",
+    label: "Medical Study Guide",
+    description: "Illustrated clinical reference — ECG figures, wave tables, caution callouts",
+    icon: Stethoscope,
+    templateId: "medical",
+    custom: { accent: "#0F766E", font: "serif", width: "default" },
+    starter: `# Medical Study Guide
+
+> [!IMPORTANT]
+> Educational reference — not a substitute for clinical judgement.
+
+## Learning objectives
+
+- [ ] Name the waves of one cardiac cycle
+- [ ] Measure rate, PR and QRS on a rhythm strip
+- [ ] Recognise the patterns that demand immediate action
+
+| Wave | What depolarises     | You see it as      |
+| ---- | -------------------- | ------------------ |
+| P    | Atria                | Small rounded bump |
+| QRS  | Ventricles           | Tall narrow spike  |
+| T    | Ventricular recovery | Broad rounded wave |
+
+::: box insight title="Clinical pearl"
+Read every strip in the same order: rate, rhythm, P waves, PR, QRS.
+:::
+
+::: chapter number=1 title="Where the Signal Comes From"
+The ECG is the heart's electrical story read from the skin — each
+heartbeat starts in the sinoatrial node and the trace tells you where
+it paused, rushed or stalled.
 :::
 `,
   },

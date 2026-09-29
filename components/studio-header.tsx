@@ -3,24 +3,41 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Clapperboard, FileText, LibraryBig } from "lucide-react";
+import { Clapperboard, Code2, FileText, LibraryBig, Megaphone } from "lucide-react";
 
 import { useLibraryOpen } from "@/components/editor/library-toggle";
 import { APP_VERSION } from "@/lib/app-version";
 
 /**
- * Shared top bar for the two studio tools. Each tool lives on its own route
- * ( /manuscript-editor , /video-editor ) so the browser only loads the code
- * for the tool in use; the active tab is derived from the URL.
+ * Shared top bar for the studio tools. Each tool lives on its own route
+ * ( /manuscript-editor , /video-editor , /social-editor , /code-editor ) so the
+ * browser only loads the code for the tool in use; the active tab is derived from
+ * the URL.
  *
- * The library trigger lives here because this is the only bar both routes have.
- * It is a global asset pool, so it should not look like it belongs to one of
- * the two tools.
+ * The library trigger lives here because this is the only bar all four routes
+ * have. It is a global asset pool, so it should not look like it belongs to one
+ * of the four tools.
  */
 export function StudioHeader({ right }: { right?: React.ReactNode }) {
   const pathname = usePathname();
-  const videoMode = pathname.startsWith("/video-editor");
   const [libraryOpen, setLibraryOpen] = useLibraryOpen();
+
+  // One array rather than four hand-copied Link blocks: the last of the three was
+  // the first to drift out of sync with the others, and an active tab that
+  // highlights the wrong tool is worse than no active state at all.
+  const tools = [
+    { href: "/manuscript-editor", label: "Manuscript Editor", icon: FileText },
+    { href: "/video-editor", label: "Video Editor", icon: Clapperboard },
+    { href: "/code-editor", label: "Code Video", icon: Code2 },
+    { href: "/social-editor", label: "Post Editor", icon: Megaphone },
+  ] as const;
+
+  const tabClass = (active: boolean) =>
+    `flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+      active
+        ? "bg-background text-foreground shadow-sm"
+        : "text-muted-foreground hover:text-foreground"
+    }`;
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-background px-4">
@@ -39,7 +56,7 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
           type="button"
           onClick={() => setLibraryOpen(true)}
           aria-expanded={libraryOpen}
-          title="Images, illustrations, logos, icons, audio and video you keep for both studios"
+          title="Images, illustrations, logos, icons, audio and video you keep for all four studios"
           className={`ml-1 flex size-7 shrink-0 items-center justify-center rounded-lg border transition-colors ${
             libraryOpen
               ? "border-ring bg-muted text-foreground"
@@ -54,30 +71,15 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
           role="group"
           aria-label="Studio mode"
         >
-          <Link
-            href="/manuscript-editor"
-            aria-pressed={!videoMode}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-              !videoMode
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <FileText className="size-3.5" />
-            Manuscript Editor
-          </Link>
-          <Link
-            href="/video-editor"
-            aria-pressed={videoMode}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-              videoMode
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Clapperboard className="size-3.5" />
-            Video Editor
-          </Link>
+          {tools.map(({ href, label, icon: ToolIcon }) => {
+            const active = pathname.startsWith(href);
+            return (
+              <Link key={href} href={href} aria-pressed={active} className={tabClass(active)}>
+                <ToolIcon className="size-3.5" />
+                {label}
+              </Link>
+            );
+          })}
         </div>
       </div>
 

@@ -2266,6 +2266,458 @@ const TECHNICAL = [
   "",
 ].join("\n");
 
+const MEDICAL_FONTS = `@import url("https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+
+`;
+
+/* Medical Study Guide — a clinical-reference look in the spirit of the
+   illustrated ECG/physiology study guides (the NEDU "Made Easy" series): calm
+   off-white paper, a deep clinical teal accent, serif body for long study
+   sessions, sans headings, and ECG-grid figure panels with a pink trace.
+   Panels instead of terminals; clinical caution callouts instead of ops
+   severity codes. */
+const THEME_MEDICAL = `
+.markdown-body {
+  --md-accent: #0f766e;
+  --md-accent-contrast: #ffffff;
+  --md-paper: #fcfcf9;
+  --md-ink: #1a2226;
+  --md-muted: #4f6268;
+  --md-soft: rgba(15, 118, 110, 0.09);
+  --md-border: rgba(26, 34, 38, 0.15);
+  --md-code-bg: #143a3a;
+  --md-code-ink: #d7ece7;
+  --md-font-sans: "Source Sans 3", "Source Sans Pro", ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif;
+  --md-font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --md-font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11pt;
+  line-height: 1.7;
+  max-width: 68rem;
+  font-family: var(--md-font-serif);
+  color: var(--md-ink);
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+@page {
+  size: 6in 9in;
+  margin: 0.55in 0.5in 0.5in 0.75in;
+  @bottom-center {
+    content: counter(page);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 8pt;
+    color: #7c8f8b;
+  }
+  @top-center {
+    content: string(book-title);
+    font-family: "Source Sans 3", sans-serif;
+    font-size: 7.5pt;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #7c8f8b;
+  }
+}
+@page :first {
+  @top-center { content: none; }
+  @bottom-center { content: none; }
+}
+
+.markdown-body > h1:first-child { string-set: book-title content(); }
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  font-family: var(--md-font-sans);
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: -0.005em;
+  color: var(--md-ink);
+}
+.markdown-body h2, .markdown-body h3, .markdown-body h4 { border-bottom: none; padding-bottom: 0; }
+.markdown-body p { margin: 0.7em 0; text-align: justify; hyphens: auto; }
+.markdown-body a { color: var(--md-accent); text-decoration: none; border-bottom: 1px solid var(--md-accent); }
+.markdown-body li { margin: 0.32em 0; }
+.markdown-body strong { font-weight: 700; }
+
+.markdown-body h2 {
+  font-size: 1.5rem;
+  margin: 2.3rem 0 0.95rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 2px solid var(--md-soft);
+}
+.markdown-body h3 { font-size: 1.1rem; margin: 1.6rem 0 0.55rem; }
+.markdown-body h4 { font-size: 1rem; margin: 1.2rem 0 0.45rem; font-weight: 700; color: var(--md-accent); }
+
+.markdown-body > h1:first-child {
+  font-size: 2.05rem;
+  line-height: 1.16;
+  letter-spacing: -0.02em;
+  text-align: center;
+  padding: 2.4rem 0 0.9rem;
+  margin: 0 0 0.5rem;
+  border: none;
+}
+.markdown-body > h1:first-child + p {
+  text-align: center;
+  font-size: 1.02rem;
+  font-style: italic;
+  color: var(--md-muted);
+}
+.markdown-body h1:not(:first-child) {
+  font-size: 1.75rem;
+  text-align: center;
+  margin: 3rem auto 1.5rem;
+  border: none;
+}
+
+/* Clinical chapter opener: sans caps kicker, no ornament clutter. */
+.markdown-body .chapter-label,
+.markdown-body .part-kicker {
+  font-family: var(--md-font-sans);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-transform: uppercase;
+  color: var(--md-accent);
+  border: none;
+  padding: 0;
+}
+.markdown-body .chapter-title,
+.markdown-body .part-title {
+  font-family: var(--md-font-sans);
+  font-weight: 800;
+}
+.markdown-body .chapter-ornament,
+.markdown-body .part-ornament {
+  display: none;
+}
+
+/* ECG-grid figure panels: the paper the traces are printed on. */
+.markdown-body .code-frame {
+  margin: 1.3em 0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: var(--md-code-bg);
+  box-shadow: 0 1px 2px rgba(20, 58, 58, 0.3), 0 5px 14px rgba(20, 58, 58, 0.14);
+}
+.markdown-body .code-frame > pre {
+  margin: 0;
+  border: 0;
+  background: var(--md-code-bg);
+  color: var(--md-code-ink);
+  padding: 0.55rem 1.15rem 1rem;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  box-shadow: none;
+}
+.markdown-body .code-frame > pre code {
+  background: none;
+  color: var(--md-code-ink);
+  padding: 0;
+  font-size: inherit;
+}
+.markdown-body .code-frame .code-lang {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  font-family: "IBM Plex Mono", var(--md-font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #9ad9cd;
+  background: #0e2f2e;
+  border-bottom: 1px solid rgba(154, 217, 205, 0.2);
+}
+.markdown-body .code-frame .code-lang::before {
+  content: "\\26A5";
+  color: #5eead4;
+  letter-spacing: 0;
+}
+.markdown-body .code-frame .code-lang::after {
+  content: "\\26A5  \\26A5";
+  margin-left: auto;
+  color: #f4a7b9;
+  letter-spacing: 0.3em;
+  font-size: 0.55rem;
+}
+
+/* Clinical callouts: caution-coded, calm backgrounds, no terminal feel. */
+.markdown-body .callout {
+  border: 1px solid var(--md-border);
+  border-left: 4px solid var(--md-accent);
+  border-radius: 0.35rem;
+  padding: 0.8rem 1.05rem;
+  margin: 1.25em 0;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(26, 34, 38, 0.05);
+  font-family: var(--md-font-sans);
+}
+.markdown-body .callout-title {
+  font-family: var(--md-font-sans);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin: 0 0 0.35rem;
+  color: var(--md-accent);
+}
+.markdown-body .callout-content { color: #2c3f45; }
+.markdown-body .callout-note { border-left-color: #0e7490; }
+.markdown-body .callout-note .callout-title { color: #0e7490; }
+.markdown-body .callout-tip { border-left-color: #14b8a6; }
+.markdown-body .callout-tip .callout-title { color: #0d9488; }
+.markdown-body .callout-warning,
+.markdown-body .callout-caution { border-left-color: #e11d48; }
+.markdown-body .callout-warning .callout-title,
+.markdown-body .callout-caution .callout-title { color: #be123c; }
+.markdown-body .callout-important,
+.markdown-body .callout-error { border-left-color: #b45309; }
+.markdown-body .callout-important .callout-title,
+.markdown-body .callout-error .callout-title { color: #92400e; }
+.markdown-body .callout-best-practice { border-left-color: #7c3aed; }
+.markdown-body .callout-best-practice .callout-title { color: #6d28d9; }
+.markdown-body .callout-example { border-left-color: #059669; }
+.markdown-body .callout-example .callout-title { color: #047857; }
+
+.markdown-body table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.4em 0;
+  font-size: 0.88rem;
+  border: 1px solid #9fb8b2;
+  border-radius: 0.3rem;
+  overflow: hidden;
+}
+.markdown-body th {
+  background: #0e2f2e;
+  color: #bfe8de;
+  font-family: var(--md-font-sans);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid #0e2f2e;
+  padding: 0.5rem 0.75rem;
+  font-weight: 700;
+  text-align: left;
+}
+.markdown-body td {
+  border: 1px solid #d9e5e1;
+  padding: 0.45rem 0.75rem;
+  vertical-align: top;
+}
+.markdown-body tbody tr:nth-child(even) { background: #f2f7f5; }
+
+.markdown-body blockquote {
+  border-left: 3px solid var(--md-accent);
+  padding: 0.2rem 0 0.2rem 1rem;
+  color: var(--md-muted);
+  font-style: italic;
+}
+
+/* Study-guide figure box: ECG paper for any illustration the author drops in. */
+.markdown-body figure {
+  margin: 1.4em 0;
+  padding: 0.9rem;
+  background:
+    linear-gradient(to bottom, rgba(225, 29, 72, 0.09) 1px, transparent 1px),
+    linear-gradient(to right, rgba(225, 29, 72, 0.09) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(225, 29, 72, 0.2) 1px, transparent 1px),
+    linear-gradient(to right, rgba(225, 29, 72, 0.2) 1px, transparent 1px),
+    #fffdfd;
+  background-size:
+    6px 6px,
+    6px 6px,
+    30px 30px,
+    30px 30px;
+  border: 1px solid #e5b8c0;
+  border-radius: 0.35rem;
+}
+.markdown-body figcaption {
+  font-family: var(--md-font-sans);
+  font-size: 0.78rem;
+  color: #4f6268;
+  text-align: center;
+  margin-top: 0.55rem;
+}
+
+/* Lead labels and measurements read as reference data, not decoration. */
+.markdown-body .book-meta {
+  text-align: center;
+  font-family: var(--md-font-sans);
+  font-size: 0.85rem;
+  color: var(--md-muted);
+  border-top: 2px solid var(--md-accent);
+  border-bottom: 1px solid var(--md-border);
+  padding: 0.9rem 0;
+  margin: 1.4rem auto 2rem;
+  max-width: 30rem;
+}
+.markdown-body .copyright-page {
+  text-align: center;
+  font-family: var(--md-font-sans);
+  font-size: 0.72rem;
+  color: var(--md-muted);
+  margin: 2.5rem auto;
+  max-width: 26rem;
+  line-height: 1.7;
+}
+.markdown-body .dedication {
+  text-align: center;
+  font-style: italic;
+  color: var(--md-muted);
+  margin: 3rem auto;
+  max-width: 24rem;
+}
+`;
+
+/* Sample chapter for the medical template: the opening of an ECG study
+   guide — how the signal is made, how the strip is read, with the callout
+   and table patterns a medical author will actually reach for. */
+const MEDICAL = [
+  "# ECG Interpretation Made Simple",
+  "",
+  "*An illustrated study guide for students learning to read the trace.*",
+  "",
+  '<div class="book-meta">',
+  "Series: Clinical Study Guides",
+  "Author: Dr. Example",
+  "Level: Nursing and medical students",
+  "Edition: First edition, 2026",
+  "</div>",
+  "",
+  '<div class="copyright-page">',
+  "Copyright © 2026 Clinical Study Guides. All rights reserved.",
+  "Educational reference — not a substitute for clinical judgement.",
+  "ISBN 978-0-000-000-0",
+  "Set in Source Serif and Source Sans.",
+  "</div>",
+  "",
+  '<div class="dedication">',
+  "For the students who practise until the squiggles speak.",
+  "</div>",
+  "",
+  "[TOC]",
+  "",
+  "# Preface",
+  "",
+  "Electrocardiograms can seem daunting: rows of squiggles in six little",
+  "boxes, each one supposedly telling you something vital about a heart.",
+  "This guide builds the reading skill in the order the trace itself is",
+  "made — first where the signal comes from, then how the machine draws",
+  "it, and only then what an abnormal line means.",
+  "",
+  "> [!NOTE]",
+  "> Every chapter ends with a quick-recall table. If you can fill it from",
+  "> memory, move on; if not, reread the wave summary before continuing.",
+  "",
+  "# Chapter 1. Where the Signal Comes From",
+  "",
+  "## The cardiac conduction system",
+  "",
+  "The ECG is the body's own electrical story read from the skin. Each",
+  "heartbeat starts in the sinoatrial node, spreads across the atria,",
+  "pauses at the atrioventricular node, and races down the bundle branches",
+  "into the ventricles. The trace you read is that story, drawn by",
+  "electrodes, one beat at a time.",
+  "",
+  "| Wave  | What depolarises      | You see it as            |",
+  "| ----- | --------------------- | ------------------------ |",
+  "| P     | Atria                 | Small rounded bump       |",
+  "| QRS   | Ventricles            | Tall narrow spike        |",
+  "| T     | Ventricular recovery  | Broad rounded wave       |",
+  "",
+  "## From heart to paper",
+  "",
+  "The machine amplifies the skin-level signal and prints it on paper",
+  "ruled at 25 mm per second. One small square is 0.04 seconds, one large",
+  "square is 0.2 — the ruler every interval is measured against.",
+  "",
+  "> [!IMPORTANT]",
+  "> Always confirm the paper speed and calibration before interpreting.",
+  "> A 50 mm/s strip doubles every interval on the page.",
+  "### Rhythm strip or 12-lead?",
+  "",
+  "A rhythm strip watches one lead over time; a 12-lead looks at the heart",
+  "from twelve angles at one instant. Rate and rhythm need time; ischaemia",
+  "and axis need angles. Most real questions need both.",
+  "",
+  "```ecg-parameters",
+  "Rhythm strip II  ·  25 mm/s  ·  10 mm/mV",
+  "R-R regular  ·  rate 72/min",
+  "P before every QRS  ·  PR 0.16 s  ·  QRS 0.09 s",
+  "```",
+  "",
+  "# Chapter 2. Reading the Strip",
+  "",
+  "## The five questions",
+  "",
+  "Read every strip in the same order, every time:",
+  "",
+  "1. **Rate** — 300 over the R-R large squares.",
+  "2. **Rhythm** — calipers on the R peaks; regular or not?",
+  "3. **P waves** — one per QRS, upright in lead II?",
+  "4. **PR interval** — normal, short, or growing?",
+  "5. **QRS width** — narrow or wide?",
+  "",
+  "> [!WARNING]",
+  "> An irregularly irregular rhythm with no P waves is atrial",
+  "> fibrillation until proven otherwise. Do not anchor on the rate.",
+  "",
+  "## What normal looks like",
+  "",
+  "```ecg-trace",
+  "  R                    R",
+  "  ┃    T               ┃    T",
+  "  ┃   ╭╮              ┃   ╭╮",
+  " P┃  ╭╯╰╮    S        P┃  ╭╯╰╮    S",
+  "  ╰──╯  ╰╮  ╭━━━━━━━━━ ╰──╯  ╰╮  ╭━━━━━",
+  "         ╰━━╯                 ╰━━╯",
+  "```",
+  "",
+  "| Interval | Normal range | Measured by             |",
+  "| -------- | ------------ | ----------------------- |",
+  "| PR       | 0.12–0.20 s  | Start of P to start of QRS |",
+  "| QRS      | < 0.12 s     | Q to end of S           |",
+  "| QT       | < 0.44 s     | Q to end of T, rate-corrected |",
+  "",
+  "> [!TIP]",
+  "> Measure with calipers, not by eye. Eyes forgive slow drifts that",
+  "> calipers do not.",
+  "",
+  "## Quick recall",
+  "",
+  "| Question                | Answer to reach for        |",
+  "| ----------------------- | -------------------------- |",
+  "| Fast and regular?       | Supraventricular tachycardia first |",
+  "| Irregularly irregular?  | Atrial fibrillation first  |",
+  "| Wide + fast + regular?  | Ventricular tachycardia until proven otherwise |",
+  "",
+  "---",
+  "",
+  "## Ischaemia and the ST segment",
+  "",
+  "The ST segment is the quiet line between the QRS and the T wave. When",
+  "the muscle is starved, that line lifts or sags, and the leads that show",
+  "it tell you which wall is talking:",
+  "",
+  "| Leads        | Wall involved  | Typical artery        |",
+  "| ------------ | -------------- | --------------------- |",
+  "| V1–V4        | Anterior       | Left anterior descending |",
+  "| II, III, aVF | Inferior       | Right coronary        |",
+  "| I, aVL, V5–V6 | Lateral       | Circumflex            |",
+  "",
+  "> [!EXAMPLE]",
+  "> Exercise: take any strip in this chapter and answer the five questions",
+  "> aloud in under sixty seconds. Speed is the skill.",
+  "",
+].join("\n");
+
 const CYBERSEC = [
   "# The Blue Team Field Manual",
   "",
@@ -2596,6 +3048,13 @@ export const TEMPLATES: BookTemplate[] = [
     description: "Blue-team field manual — terminal code panels, severity callouts",
     style: CYBERSEC_FONTS + BASE_CSS + THEME_CYBERSEC + THERAPEUTIC_COMPONENTS_CSS,
     content: CYBERSEC,
+  },
+  {
+    id: "medical",
+    label: "Medical Study Guide",
+    description: "Illustrated clinical reference — ECG-grid figures, teal accents, caution callouts",
+    style: MEDICAL_FONTS + BASE_CSS + THEME_MEDICAL + THERAPEUTIC_COMPONENTS_CSS,
+    content: MEDICAL,
   },
 ];
 

@@ -3,137 +3,17 @@
 > next dev
 
 ▲ Next.js 16.3.5 (Turbopack)
-- Local:         http://localhost:65482
-- Network:       http://172.16.0.2:65482
-✓ Ready in 4.5s
-✓ Running next.config.ts took 337ms
+- Local:         http://localhost:57493
+- Network:       http://172.16.0.2:57493
+✓ Ready in 4.1s
+✓ Running next.config.ts took 177ms
+⨯ Another next dev server is already running.
 
- GET /video-editor 200 in 478ms (next.js: 189ms, application-code: 289ms)
- GET /video-editor 200 in 61ms (next.js: 7ms, application-code: 53ms)
-✓ Compiled in 120ms
- GET /video-editor 200 in 43ms (next.js: 15ms, application-code: 28ms)
-[browser] Uncaught ReferenceError: pieceWordCount is not defined
-    at eval (lib/subtitles.ts:265:38)
-    at Array.forEach (<anonymous>)
-    at cuesForScene (lib/subtitles.ts:232:10)
-    at buildTimelineCues (lib/subtitles.ts:383:20)
-    at VideoStudio.useMemo[subtitleCues] (components/editor/video-studio.tsx:1151:24)
-    at VideoStudio (components/editor/video-studio.tsx:1149:31)
-    at VideoEditorPage (app/video-editor/page.tsx:121:13)
-  263 |         end: Math.max(cursor, end),
-  264 |         words: slice,
-> 265 |         lineStarts: slice.length === pieceWordCount ? lineStarts : [],
-      |                                      ^
-  266 |       });
-  267 |     }
-  268 |     cursor += share;
-⚠ Fast Refresh had to perform a full reload due to a runtime error.
-✓ Compiled in 94ms
-[browser] Encountered a script tag while rendering React component. Scripts inside React components are never executed when rendering on the client. Consider using template tag instead (https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template). 
-    at Set.forEach (<anonymous>) (<anonymous>)
- GET /video-editor 200 in 76ms (next.js: 11ms, application-code: 65ms)
- GET /video-editor 200 in 65ms (next.js: 6ms, application-code: 59ms)
-✓ Compiled in 192ms
- GET /video-editor 200 in 63ms (next.js: 41ms, application-code: 22ms)
-✓ Compiled in 145ms
- GET /video-editor 200 in 34ms (next.js: 13ms, application-code: 21ms)
-✓ Compiled in 126ms
-[browser] Uncaught ReferenceError: SubtitleStylePicker is not defined
-    at VideoStudio (components/editor/video-studio.tsx:3665:14)
-    at VideoEditorPage (app/video-editor/page.tsx:121:13)
-  3663 |               Subs
-  3664 |             </Button>
-> 3665 |             <SubtitleStylePicker
-       |              ^
-  3666 |               value={subtitleStyleId}
-  3667 |               onChange={setSubtitleStyleId}
-  3668 |               disabled={!subtitlesOn}
-⚠ Fast Refresh had to perform a full reload due to a runtime error.
-✓ Compiled in 154ms
- GET /video-editor 200 in 67ms (next.js: 11ms, application-code: 55ms)
- GET /video-editor 200 in 36ms (next.js: 13ms, application-code: 24ms)
-✓ Compiled in 100ms
- GET /video-editor 200 in 59ms (next.js: 6ms, application-code: 53ms)
- GET /video-editor 200 in 100ms (next.js: 21ms, application-code: 79ms)
-✓ Compiled in 315ms
- GET /video-editor 200 in 72ms (next.js: 27ms, application-code: 46ms)
-[browser] Uncaught ReferenceError: LibraryBig is not defined
-    at VideoStudio (components/editor/video-studio.tsx:3097:14)
-    at VideoEditorPage (app/video-editor/page.tsx:121:13)
-  3095 |             title="Images, illustrations, logos, icons, audio and video you keep for both studios"
-  3096 |           >
-> 3097 |             <LibraryBig className="size-3" />
-       |              ^
-  3098 |             Library
-  3099 |           </Button>
-  3100 |           <div
-✓ Compiled in 361ms
-⚠ Fast Refresh had to perform a full reload due to a runtime error.
- GET /video-editor 200 in 130ms (next.js: 31ms, application-code: 100ms)
- GET /video-editor 200 in 99ms (next.js: 14ms, application-code: 86ms)
- GET /video-editor 200 in 35ms (next.js: 11ms, application-code: 24ms)
-✓ Compiled in 200ms
-✓ Compiled in 110ms
- GET /video-editor 200 in 46ms (next.js: 16ms, application-code: 30ms)
-⚠ Fast Refresh had to perform a full reload due to a runtime error.
-✓ Compiled in 167ms
- GET /video-editor 200 in 88ms (next.js: 14ms, application-code: 74ms)
-⨯ ReferenceError: APP_VERSION is not defined
-    at Module.eval (app\layout.tsx:23:21)
-    at module evaluation (C:\Users\MANUELA\Documents\GitHub\html-to-docx-converter\.next\dev\server\chunks\ssr\[root-of-the-server]__1jx81qo._.js:136:47)
-  21 |   // Next has no version field for metadata, and a tab title carrying a version
-  22 |   // number goes stale without anyone noticing. The header shows it instead.
-> 23 |   other: { version: APP_VERSION },
-     |                     ^
-  24 |   icons: {
-  25 |     icon: "/logo.webp",
-  26 |     apple: "/apple-touch-icon.png",
-⨯ ReferenceError: APP_VERSION is not defined
-    at Module.eval (app\layout.tsx:23:21)
-    at module evaluation (C:\Users\MANUELA\Documents\GitHub\html-to-docx-converter\.next\dev\server\chunks\ssr\[root-of-the-server]__1jx81qo._.js:136:47)
-  21 |   // Next has no version field for metadata, and a tab title carrying a version
-  22 |   // number goes stale without anyone noticing. The header shows it instead.
-> 23 |   other: { version: APP_VERSION },
-     |                     ^
-  24 |   icons: {
-  25 |     icon: "/logo.webp",
-  26 |     apple: "/apple-touch-icon.png", {
-  page: '/video-editor'
-}
- GET /video-editor 500 in 2.2s (next.js: 1686ms, application-code: 554ms)
-⨯ ReferenceError: APP_VERSION is not defined
-    at Module.eval (app\layout.tsx:23:21)
-    at module evaluation (C:\Users\MANUELA\Documents\GitHub\html-to-docx-converter\.next\dev\server\chunks\ssr\[root-of-the-server]__1jx81qo._.js:136:47)
-  21 |   // Next has no version field for metadata, and a tab title carrying a version
-  22 |   // number goes stale without anyone noticing. The header shows it instead.
-> 23 |   other: { version: APP_VERSION },
-     |                     ^
-  24 |   icons: {
-  25 |     icon: "/logo.webp",
-  26 |     apple: "/apple-touch-icon.png", {
-  page: '/video-editor'
-}
-⨯ ReferenceError: APP_VERSION is not defined
-    at Module.eval (app\layout.tsx:23:21)
-    at module evaluation (C:\Users\MANUELA\Documents\GitHub\html-to-docx-converter\.next\dev\server\chunks\ssr\[root-of-the-server]__1jx81qo._.js:136:47)
-  21 |   // Next has no version field for metadata, and a tab title carrying a version
-  22 |   // number goes stale without anyone noticing. The header shows it instead.
-> 23 |   other: { version: APP_VERSION },
-     |                     ^
-  24 |   icons: {
-  25 |     icon: "/logo.webp",
-  26 |     apple: "/apple-touch-icon.png", {
-  page: '/video-editor'
-}
- GET /video-editor 500 in 47ms (next.js: 38ms, application-code: 8ms)
-[browser] Uncaught ReferenceError: APP_VERSION is not defined
-    at Module.eval (app\layout.tsx:23:21)
-    at module evaluation (app/layout.tsx:45:29)
-  21 |   // Next has no version field for metadata, and a tab title carrying a version
-  22 |   // number goes stale without anyone noticing. The header shows it instead.
-> 23 |   other: { version: APP_VERSION },
-     |                     ^
-  24 |   icons: {
-  25 |     icon: "/logo.webp",
-  26 |     apple: "/apple-touch-icon.png",
- GET /video-editor 200 in 55ms (next.js: 23ms, application-code: 31ms)
+- Local:        http://localhost:3000
+- PID:          23068
+- Dir:          C:\Users\MANUELA\Documents\GitHub\html-to-docx-converter
+- Log:          .next\dev\logs\next-development.log
+
+You can access the existing server at http://localhost:3000,
+or run taskkill /PID 23068 /F to stop it and start a new one.
+[?25h
