@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   AlignLeft,
   ArrowDown,
@@ -177,6 +186,21 @@ type VideoStudioProps = {
 };
 
 const STORE_KEY = "book-studio-video";
+
+/**
+ * The inspector's own width, in pixels, and where that preference is kept.
+ *
+ * The stage used to be whatever the `1fr` grid column left over, which made it
+ * impossible to give the film more room without collapsing the inspector, and
+ * impossible to see the whole export control without the window being wide
+ * enough by luck. The author drags the divider instead, and the width survives
+ * a reload so the layout they chose is the layout they get back.
+ */
+const INSPECTOR_WIDTH_KEY = "book-studio-video-inspector-width";
+const INSPECTOR_WIDTH_DEFAULT = 320;
+/** Narrower than the export control, which would clip instead of fit. */
+const INSPECTOR_WIDTH_MIN = 260;
+const INSPECTOR_WIDTH_MAX = 720;
 
 /**
  * The extension to give a clip inside the export ZIP.
@@ -1136,6 +1160,99 @@ export function VideoStudio({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenBlocked, setFullscreenBlocked] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * How wide the inspector is, and whether the divider is being dragged.
+   *
+   * `resizing` exists to keep the text selection and the pointer's own drag
+   * behaviour out of the way while the pointer is down on the handle, which is
+   * the difference between a divider that feels solid and one that selects the
+   * whole studio.
+   */
+  const [inspectorWidth, setInspectorWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return INSPECTOR_WIDTH_DEFAULT;
+    try {
+      const stored = Number(window.localStorage.getItem(INSPECTOR_WIDTH_KEY));
+      return Number.isFinite(stored) &&
+        stored >= INSPECTOR_WIDTH_MIN &&
+        stored <= INSPECTOR_WIDTH_MAX
+        ? stored
+        : INSPECTOR_WIDTH_DEFAULT;
+    } catch {
+      return INSPECTOR_WIDTH_DEFAULT;
+    }
+  });
+  const [resizing, setResizing] = useState(false);
+  const inspectorDrag = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  /**
+   * Moves the divider, and only writes the width out on the last step of a drag.
+   *
+   * Persisting every pointermove would put a localStorage write in the middle of
+   * the gesture that is supposed to be the smoothest part of the app.
+   */
+  const setInspector = useCallback((next: number, persist: boolean) => {
+    const width = Math.min(
+      INSPECTOR_WIDTH_MAX,
+      Math.max(INSPECTOR_WIDTH_MIN, Math.round(next)),
+    );
+    setInspectorWidth(width);
+    if (!persist) return;
+    try {
+      window.localStorage.setItem(INSPECTOR_WIDTH_KEY, String(width));
+    } catch {
+      /* non-critical: the width is a preference, not the project */
+    }
+  }, []);
+
+  const onInspectorPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      // Keeps the browser from starting a text selection or an image drag
+      // under the pointer while the divider moves.
+      e.preventDefault();
+      inspectorDrag.current = { startX: e.clientX, startWidth: inspectorWidth };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setResizing(true);
+    },
+    [inspectorWidth],
+  );
+
+  const onInspectorPointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      const drag = inspectorDrag.current;
+      if (!drag) return;
+      setInspector(drag.startWidth + (e.clientX - drag.startX), false);
+    },
+    [setInspector],
+  );
+
+  const onInspectorPointerUp = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      const drag = inspectorDrag.current;
+      if (!drag) return;
+      inspectorDrag.current = null;
+      setResizing(false);
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      setInspector(drag.startWidth + (e.clientX - drag.startX), true);
+    },
+    [setInspector],
+  );
+
+  /** Arrow keys move the divider too, so it is reachable without a pointer. */
+  const onInspectorKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      const step = e.shiftKey ? 64 : 16;
+      if (e.key === "ArrowLeft") setInspector(inspectorWidth - step, true);
+      else if (e.key === "ArrowRight") setInspector(inspectorWidth + step, true);
+      else if (e.key === "Home") setInspector(INSPECTOR_WIDTH_MIN, true);
+      else if (e.key === "End") setInspector(INSPECTOR_WIDTH_MAX, true);
+      else return;
+      e.preventDefault();
+    },
+    [inspectorWidth, setInspector],
+  );
 
   const totalDuration = useMemo(
     () => scenes.reduce((acc, s) => acc + s.duration, 0),
@@ -3150,9 +3267,15 @@ export function VideoStudio({
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-[minmax(280px,340px)_1fr]">
+      <div
+        className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:flex"
+        // The width is a CSS variable rather than an inline `width` so the
+        // stacked layout below `lg` ignores it: there the two panes share the
+        // height and a fixed width would leave a gap beside the stage.
+        style={{ "--inspector-w": `${inspectorWidth}px` } as CSSProperties}
+      >
         {/* Scene inspector */}
-        <div className="flex min-h-0 flex-col border-b lg:border-b-0 lg:border-r">
+        <div className="flex min-h-0 flex-col border-b lg:w-[var(--inspector-w)] lg:shrink-0 lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between border-b bg-muted/50 px-4 py-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Inspector
@@ -3643,7 +3766,11 @@ export function VideoStudio({
             </div>
           )}
 
-          <div className="flex items-center gap-1 border-t p-2">
+          {/* Wraps on purpose. The export control is two buttons that refuse to
+              shrink, so in a narrow inspector the row used to run past the edge
+              and the download button was simply not there. A second line is
+              cheaper than a control the author cannot find. */}
+          <div className="flex flex-wrap items-center gap-1 border-t p-2">
             <Button
               variant="outline"
               size="sm"
@@ -3685,12 +3812,37 @@ export function VideoStudio({
           </div>
         </div>
 
+        {/* Divider. Only in the side-by-side layout: stacked, the two panes are
+            already full width and there is nothing to divide. */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the inspector"
+          aria-valuenow={inspectorWidth}
+          aria-valuemin={INSPECTOR_WIDTH_MIN}
+          aria-valuemax={INSPECTOR_WIDTH_MAX}
+          tabIndex={0}
+          onPointerDown={onInspectorPointerDown}
+          onPointerMove={onInspectorPointerMove}
+          onPointerUp={onInspectorPointerUp}
+          onPointerCancel={onInspectorPointerUp}
+          onKeyDown={onInspectorKeyDown}
+          onDoubleClick={() => setInspector(INSPECTOR_WIDTH_DEFAULT, true)}
+          title="Drag to give the film more room, or double-click to reset"
+          className={cn(
+            "hidden w-1 shrink-0 touch-none items-center justify-center transition-colors hover:bg-foreground/20 lg:flex",
+            resizing && "bg-foreground/30",
+          )}
+        >
+          <span className="h-8 w-0.5 rounded-full bg-foreground/25" />
+        </div>
+
         {/* Preview + transport. This is the fullscreen target so the scrubber
             and the play controls stay reachable while watching. */}
         <div
           ref={stageRef}
           className={cn(
-            "flex min-h-0 flex-col bg-zinc-950",
+            "flex min-h-0 flex-col bg-zinc-950 lg:min-w-0 lg:flex-1",
             isFullscreen && "video-fullscreen",
           )}
         >

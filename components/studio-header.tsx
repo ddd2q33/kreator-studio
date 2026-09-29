@@ -3,33 +3,30 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Clapperboard, Code2, FileText, LibraryBig, Megaphone } from "lucide-react";
+import { Clapperboard, FileText, LibraryBig } from "lucide-react";
 
 import { useLibraryOpen } from "@/components/editor/library-toggle";
 import { APP_VERSION } from "@/lib/app-version";
 
 /**
  * Shared top bar for the studio tools. Each tool lives on its own route
- * ( /manuscript-editor , /video-editor , /social-editor , /code-editor ) so the
- * browser only loads the code for the tool in use; the active tab is derived from
- * the URL.
+ * ( /manuscript-editor , /video-editor ) so the browser only loads the code for
+ * the tool in use; the active tab is derived from the URL.
  *
- * The library trigger lives here because this is the only bar all four routes
- * have. It is a global asset pool, so it should not look like it belongs to one
- * of the four tools.
+ * The library trigger lives here because this is the only bar both routes have.
+ * It is a global asset pool, so it should not look like it belongs to one of
+ * the two tools.
  */
 export function StudioHeader({ right }: { right?: React.ReactNode }) {
   const pathname = usePathname();
   const [libraryOpen, setLibraryOpen] = useLibraryOpen();
 
-  // One array rather than four hand-copied Link blocks: the last of the three was
-  // the first to drift out of sync with the others, and an active tab that
+  // One array rather than two hand-copied Link blocks: the last of the two was
+  // the first to drift out of sync with the other, and an active tab that
   // highlights the wrong tool is worse than no active state at all.
   const tools = [
     { href: "/manuscript-editor", label: "Manuscript Editor", icon: FileText },
     { href: "/video-editor", label: "Video Editor", icon: Clapperboard },
-    { href: "/code-editor", label: "Code Video", icon: Code2 },
-    { href: "/social-editor", label: "Post Editor", icon: Megaphone },
   ] as const;
 
   const tabClass = (active: boolean) =>
@@ -56,7 +53,7 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
           type="button"
           onClick={() => setLibraryOpen(true)}
           aria-expanded={libraryOpen}
-          title="Images, illustrations, logos, icons, audio and video you keep for all four studios"
+          title="Images, illustrations, logos, icons, audio and video you keep for both studios"
           className={`ml-1 flex size-7 shrink-0 items-center justify-center rounded-lg border transition-colors ${
             libraryOpen
               ? "border-ring bg-muted text-foreground"
