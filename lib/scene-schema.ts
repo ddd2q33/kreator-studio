@@ -98,6 +98,55 @@ export type SceneAudio = {
   regions: { start: number; end: number }[];
 };
 
+/**
+ * A code snippet painted onto the scene's frame.
+ *
+ * This is what turns a scene from a title card into a programming video: the
+ * snippet is the picture, and the narration explains it. It is plain text plus
+ * a language name rather than a file, because a scene is a moment, not a
+ * project - the author pastes the eight lines that matter and the video shows
+ * those eight lines.
+ *
+ * The defaults are chosen so that a scene with nothing but `code: "…"` is a
+ * usable scene: plain text, shown all at once, at the size that fits the frame.
+ */
+export type SceneCode = {
+  /** highlight.js grammar name, or "text" for no colour. */
+  language: string;
+  /** The snippet itself, as pasted. */
+  source: string;
+  /** Panel palette; see lib/code-panel.ts. */
+  theme: string;
+  /** How much of the snippet the frame shows, and when. */
+  reveal: CodeReveal;
+  /** Font size as a fraction of the frame width, before the panel fits it. */
+  scale: number;
+};
+
+/** How a snippet appears over the life of the scene. */
+export const CODE_REVEALS = ["all", "typed", "lines"] as const;
+export type CodeReveal = (typeof CODE_REVEALS)[number];
+
+/** Bounds for `scale`, so a hand-edited file cannot ask for a 4px font. */
+export const CODE_SCALE_MIN = 0.4;
+export const CODE_SCALE_MAX = 2;
+/** Longest snippet kept on a scene; a file pasted by accident is a mistake. */
+export const CODE_SOURCE_MAX = 8000;
+
+/**
+ * The palette a snippet gets when the author does not pick one.
+ *
+ * Only the id lives here. The palettes themselves are presentation and live in
+ * lib/code-panel.ts, which is the only module that draws; an id this build does
+ * not know falls back to the first palette rather than failing the frame.
+ */
+export const DEFAULT_CODE_THEME = "midnight";
+
+const asReveal = (v: unknown, fallback: CodeReveal): CodeReveal =>
+  typeof v === "string" && (CODE_REVEALS as readonly string[]).includes(v)
+    ? (v as CodeReveal)
+    : fallback;
+
 export type VideoScene = {
   id: string;
   /** Links the scene back to the chapter it was generated from, if any. */
@@ -130,6 +179,14 @@ export type VideoScene = {
   volume: number;
   /** Muted scenes keep their clip but contribute silence, for a beat without deleting it. */
   muted: boolean;
+  /**
+   * Code painted on the frame, or null for a scene with no code.
+   *
+   * Optional in the file and always present on a scene in memory, so a project
+   * written before code scenes existed loads unchanged and a scene without a
+   * snippet is simply a title card.
+   */
+  code: SceneCode | null;
 };
 
 export type SceneDocument = {
@@ -350,6 +407,68 @@ export function normalizeSceneAudio(
 }
 
 /**
+ * Repairs a scene's code snippet.
+ *
+ * Accepts both shapes on purpose, because the author writes both by hand: a
+ * bare string is the common case (`"code": "const x = 1"`) and an object is how
+ * the language, the palette and the reveal are set. A snippet with no text is
+ * dropped rather than kept as an empty card, since a frame with an empty panel
+ * is worse than a frame with no panel.
+ */
+export function normalizeSceneCode(
+  input: unknown,
+): { code: SceneCode | null; warnings: string[] } {
+  if (input === undefined || input === null) return { code: null, warnings: [] };
+  if (typeof input === "string") {
+    const source = input.trim();
+    return {
+      code: source
+        ? { language: "text", source, theme: DEFAULT_CODE_THEME, reveal: "all", scale: 1 }
+        : null,
+      warnings: [],
+    };
+  }
+  if (!isRecord(input)) return { code: null, warnings: [] };
+
+  const rawSource = typeof input.source === "string" ? input.source : "";
+  const source = rawSource.trim();
+  if (source === "") return { code: null, warnings: [] };
+
+  const warnings: string[] = [];
+  if (rawSource.length > CODE_SOURCE_MAX) {
+    warnings.push(
+      `code is ${rawSource.length} chars — trimmed to ${CODE_SOURCE_MAX}`,
+    );
+  }
+
+  const rawReveal = asOptionalText(input.reveal);
+  let reveal: CodeReveal = "all";
+  if (rawReveal && !(CODE_REVEALS as readonly string[]).includes(rawReveal)) {
+    warnings.push(`unknown code reveal "${rawReveal}" — used "all"`);
+  } else {
+    reveal = asReveal(rawReveal, "all");
+  }
+
+  const rawScale = asNumber(input.scale);
+  if (rawScale !== null && (rawScale < CODE_SCALE_MIN || rawScale > CODE_SCALE_MAX)) {
+    warnings.push(
+      `code scale ${rawScale} is outside ${CODE_SCALE_MIN}–${CODE_SCALE_MAX} — clamped`,
+    );
+  }
+
+  return {
+    code: {
+      language: asText(input.language, "text"),
+      source: rawSource.slice(0, CODE_SOURCE_MAX),
+      theme: asText(input.theme, DEFAULT_CODE_THEME),
+      reveal,
+      scale: rawScale === null ? 1 : clamp(rawScale, CODE_SCALE_MIN, CODE_SCALE_MAX),
+    },
+    warnings,
+  };
+}
+
+/**
  * Repairs one scene. Returns `scene: null` (with a warning) only when the input
  * is not an object at all.
  *
@@ -437,6 +556,9 @@ export function normalizeScene(
   });
   warnings.push(...audioWarnings);
 
+  const { code, warnings: codeWarnings } = normalizeSceneCode(input.code);
+  warnings.push(...codeWarnings);
+
   return {
     scene: {
       id: asOptionalText(input.id) ?? (options.newId ?? (() => uid("scene-")))(),
@@ -453,6 +575,7 @@ export function normalizeScene(
       audio,
       volume: asGain(input.volume, 1),
       muted: input.muted === true,
+      code,
     },
     warnings: warnings.map((w) => `${label}: ${w}`),
   };

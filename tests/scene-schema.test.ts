@@ -820,3 +820,71 @@ describe("normalizeFirstScene", () => {
     assert.equal(totalScenes, 1);
   });
 });
+
+describe("code on a scene", () => {
+  it("gives every scene a code field, even a project written before code", () => {
+    const { scene } = normalizeScene({ title: "A" }, 0);
+    assert.equal(scene?.code, null);
+  });
+
+  it("carries a snippet through normalization untouched", () => {
+    const code = {
+      language: "python",
+      source: "print('hi')",
+      theme: "paper",
+      reveal: "lines" as const,
+      scale: 1.2,
+    };
+    const { scene, warnings } = normalizeScene({ title: "A", code }, 0);
+    assert.deepEqual(scene?.code, code);
+    assert.deepEqual(warnings, []);
+  });
+
+  it("takes the shorthand string form an author may hand-write", () => {
+    const { scene } = normalizeScene({ title: "A", code: "const a = 1;" }, 0);
+    assert.equal(scene?.code?.language, "text");
+    assert.equal(scene?.code?.source, "const a = 1;");
+    assert.equal(scene?.code?.reveal, "all");
+  });
+
+  it("reports a bad snippet without dropping the scene", () => {
+    const { scene, warnings } = normalizeScene(
+      { title: "A", code: { source: "x", reveal: "explode", scale: 40 } },
+      0,
+    );
+    assert.notEqual(scene, null);
+    assert.equal(scene?.code?.reveal, "all");
+    assert.equal(scene?.code?.scale, 2);
+    assert.match(warnings.join(" "), /unknown code reveal "explode"/);
+  });
+
+  it("keeps a snippet on each subscene of a grouped section", () => {
+    const { document } = normalizeSceneDocument({
+      scenes: [
+        {
+          scene: { title: "Part 1" },
+          subscenes: [
+            { title: "one", code: "a = 1" },
+            { title: "two", code: { source: "b = 2", language: "python" } },
+          ],
+        },
+      ],
+    });
+    const scenes = document?.scenes ?? [];
+    assert.equal(scenes.length, 2);
+    assert.equal(scenes[0]?.code?.source, "a = 1");
+    assert.equal(scenes[1]?.code?.language, "python");
+  });
+
+  it("survives a save and reload of a scene with a snippet", () => {
+    const original = normalizeScene(
+      { title: "A", code: { source: "x = 1", language: "python", scale: 1.5 } },
+      0,
+    ).scene;
+    assert.notEqual(original, null);
+    // The round trip an author does by hand: export the scene, edit nothing,
+    // import it again.
+    const reloaded = normalizeScene(JSON.parse(JSON.stringify(original)), 0).scene;
+    assert.deepEqual(reloaded, original);
+  });
+});

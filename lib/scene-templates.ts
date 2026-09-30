@@ -106,6 +106,80 @@ const media = {
 };
 
 /**
+ * A teaching section: every subscene carries a snippet, so applying this drops
+ * a run of code frames into the timeline instead of a run of title cards.
+ *
+ * `code` is read per subscene, not from the group, so a grouped template has to
+ * repeat it. The fields are the ones that warn when wrong: `reveal` outside
+ * all/typed/lines, a `scale` outside 0.4-2, or a source over 8000 characters
+ * all fail the template test, which is why these stay inside the limits.
+ */
+const lesson = {
+  scene: "How a memo cache works",
+  kicker: "LESSON 01",
+  subscenes: [
+    {
+      narration: "A memo cache remembers what it already computed.",
+      duration: 3,
+      transition: "fade",
+    },
+    {
+      narration: "Here is the whole idea: look it up, compute it only if it is missing.",
+      duration: 5,
+      transition: "fade",
+      code: {
+        language: "typescript",
+        source: [
+          "function memo<T>(compute: (n: number) => T) {",
+          "  const cache = new Map<number, T>();",
+          "  return (n: number): T => {",
+          "    if (cache.has(n)) return cache.get(n)!;",
+          "    const value = compute(n);",
+          "    cache.set(n, value);",
+          "    return value;",
+          "  };",
+          "}",
+        ].join("\n"),
+        theme: "midnight",
+        reveal: "lines",
+        scale: 1,
+      },
+    },
+    {
+      narration: "The cache lookup is the entire optimisation.",
+      duration: 4,
+      transition: "fade",
+      code: {
+        language: "typescript",
+        source: "if (cache.has(n)) return cache.get(n)!;",
+        theme: "midnight",
+        reveal: "typed",
+        scale: 1.15,
+      },
+    },
+    {
+      narration: "Type it out character by character for the trick, and show it whole for the result.",
+      duration: 4,
+      transition: "fade",
+      code: {
+        language: "python",
+        source: ["@lru_cache(maxsize=None)", "def fib(n):", "    return n if n < 2 else fib(n - 1) + fib(n - 2)"].join(
+          "\n",
+        ),
+        theme: "paper",
+        reveal: "all",
+        scale: 1,
+      },
+    },
+    {
+      narration: "Now try it on your own code.",
+      duration: 3,
+      transition: "fade",
+    },
+  ],
+};
+
+/**
  * The full set, in the order the picker shows them: simplest first, so the
  * first three options cover every shape and the rest are reference material.
  */
@@ -121,6 +195,12 @@ export const SCENE_JSON_TEMPLATES: readonly SceneJsonTemplate[] = [
     label: "Section with subscenes",
     hint: "One named section that becomes a run of scenes.",
     json: JSON.stringify(section, null, 2),
+  },
+  {
+    id: "programming",
+    label: "Programming lesson",
+    hint: "A run of code frames, one snippet per scene.",
+    json: JSON.stringify(lesson, null, 2),
   },
   {
     id: "episode",

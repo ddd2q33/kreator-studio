@@ -73,6 +73,32 @@ describe("scene JSON templates", () => {
     assert.equal(scene?.audio?.key, "clip-replace-me");
   });
 
+  it("the programming template lands a snippet on each code scene", () => {
+    const { document, warnings } = applyTemplate("programming");
+    assert.deepEqual(warnings, []);
+    const scenes = document!.scenes;
+    const withCode = scenes.filter((s) => s.code !== null);
+    // The two framing scenes have no snippet on purpose: a lesson that opens and
+    // closes on a wall of code is harder to follow, not easier.
+    assert.equal(withCode.length, 3, `${scenes.length} scenes, ${withCode.length} with code`);
+    assert.deepEqual(
+      withCode.map((s) => s.code!.language),
+      ["typescript", "typescript", "python"],
+    );
+    // Each reveal is a different one, so the template demonstrates all three
+    // rather than repeating whichever was typed last.
+    assert.deepEqual(
+      withCode.map((s) => s.code!.reveal),
+      ["lines", "typed", "all"],
+    );
+    // The line-by-line snippet is the only one that has to stay under the
+    // painter's frame cap, so it is the one worth pinning.
+    assert.equal(withCode[0]!.code!.source.split("\n").length, 9);
+    // Every scene in the run is editable text, so nothing here can be a typo
+    // the author has no way to see.
+    assert.equal(scenes.every((s) => s.group === "How a memo cache works"), true);
+  });
+
   it("the single-scene template is one scene and not a document", () => {
     // Guards the routing the editor depends on: an object without a `scenes`
     // array must not be read as a document, or the `scenes` key of a real

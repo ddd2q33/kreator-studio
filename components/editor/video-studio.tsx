@@ -52,6 +52,10 @@ import {
   DURATION_MAX,
   DURATION_MIN,
   IMAGE_FITS,
+  CODE_REVEALS,
+  CODE_SCALE_MAX,
+  CODE_SCALE_MIN,
+  DEFAULT_CODE_THEME,
   SCENE_FORMAT_VERSION,
   TRANSITIONS as TRANSITION_IDS,
   normalizeFirstScene,
@@ -59,8 +63,16 @@ import {
   normalizeSceneDocument,
   normalizeSceneInput,
 } from "@/lib/scene-schema";
+import {
+  CODE_LANGUAGES,
+  CODE_PANEL_THEMES,
+  CODE_REVEAL_LABELS,
+  paintCodePanel,
+} from "@/lib/code-panel";
 import type {
+  CodeReveal,
   ImageFit,
+  SceneCode,
   SceneDocument,
   Transition,
   VideoScene,
@@ -201,21 +213,6 @@ const INSPECTOR_WIDTH_DEFAULT = 320;
 /** Narrower than the export control, which would clip instead of fit. */
 const INSPECTOR_WIDTH_MIN = 260;
 const INSPECTOR_WIDTH_MAX = 720;
-
-/**
- * The extension to give a clip inside the export ZIP.
- *
- * Taken from the original name where possible so the file still opens in a
- * desktop editor; the descriptor's MIME type is the fallback for a dropped
- * file whose name has no extension.
- */
-function audioExtension(audio: { name: string; type: string }): string {
-  const fromName = /\.[a-z0-9]{1,5}$/i.exec(audio.name)?.[0];
-  if (fromName) return fromName.toLowerCase();
-  const fromType = audio.type.split("/")[1]?.split(";")[0];
-  if (fromType) return `.${fromType === "mpeg" ? "mp3" : fromType}`;
-  return ".bin";
-}
 
 /** JSON, by MIME type or by extension — some browsers report an empty type. */
 function isJsonFile(file: File): boolean {
@@ -371,6 +368,7 @@ const DEFAULT_SCENE = (): VideoScene => ({
   volume: 1,
   muted: false,
   audio: null,
+  code: null,
 });
 
 /**
@@ -962,6 +960,24 @@ function paintScene(
   const titleText = scene.title.trim();
   const subtitleText = scene.subtitle.trim();
 
+  // A scene with a snippet is a different layout, not the same layout with more
+  // on it: the code is the picture, so the words move out from under it and
+  // stack above it where they can be read once and not re-read while the code is
+  // on screen. An empty snippet is not a snippet, so the check is on the text:
+  // the author pastes into the field, and the frame stays a title card until
+  // there is something to read.
+  if (scene.code && scene.code.source.trim()) {
+    paintSceneCodeFrame(
+      ctx,
+      w,
+      h,
+      scene,
+      t,
+      { kickerText, titleText, subtitleText, subtitle, subtitleStyle, now },
+    );
+    return;
+  }
+
   const kick = 0.34 * w;
   ctx.font = `700 ${Math.round(kick)}px "JetBrains Mono", monospace`;
   ctx.fillStyle = "rgba(255,255,255,0.85)";
@@ -991,6 +1007,88 @@ function paintScene(
     for (const line of subLines) {
       ctx.fillText(line, w / 2, sy);
       sy += subSize * 1.45;
+    }
+  }
+
+  paintSubtitle(ctx, w, h, subtitle, subtitleStyle, now);
+}
+
+/** The frame text of a scene that carries a snippet. */
+function paintSceneCodeFrame(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  scene: VideoScene,
+  t: number,
+  words: {
+    kickerText: string;
+    titleText: string;
+    subtitleText: string;
+    subtitle: SubtitleCue | null;
+    subtitleStyle: SubtitleStyle;
+    now: number;
+  },
+) {
+  const { kickerText, titleText, subtitleText, subtitle, subtitleStyle, now } =
+    words;
+
+  // The card is centred in the space the burned-in subtitles leave, measured
+  // the same way `paintSubtitle` places its own box, so the two can never
+  // collide on a frame that has both.
+  let reserved = 0;
+  if (subtitle && subtitle.lines.length > 0) {
+    const size = Math.round(
+      Math.min(w * 0.042, h * 0.034) * subtitleStyle.sizeRatio,
+    );
+    reserved =
+      subtitle.lines.length * size * 1.32 +
+      size * subtitleStyle.platePadding +
+      h * subtitleStyle.bottomRatio +
+      h * 0.03;
+  }
+
+  paintCodePanel(ctx, w, h, {
+    code: scene.code!,
+    progress: t,
+    reservedBottom: reserved,
+  });
+
+  // Words sit above the card, anchored to the top of the frame. Kicker, title
+  // and subtitle are each optional, and the block grows downward from a fixed
+  // top edge, so a scene with only a title does not leave a gap where the
+  // kicker would have been.
+  let y = h * 0.12;
+  ctx.textAlign = "center";
+
+  if (kickerText) {
+    ctx.font = `700 ${Math.round(0.052 * w)}px "JetBrains Mono", monospace`;
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.fillText(kickerText.toUpperCase(), w / 2, y);
+    y += 0.09 * h;
+  }
+
+  if (titleText) {
+    const titleSize = Math.round(Math.min(w * 0.058, h * 0.05));
+    ctx.font = `800 ${titleSize}px Inter, "Inter", sans-serif`;
+    ctx.fillStyle = "#ffffff";
+    const lines = wrapText(ctx, titleText, w * 0.8);
+    const lineH = titleSize * 1.16;
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = 24;
+    for (const line of lines) {
+      ctx.fillText(line, w / 2, y);
+      y += lineH;
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  if (subtitleText) {
+    const subSize = Math.round(Math.min(w * 0.028, h * 0.022));
+    ctx.font = `500 ${subSize}px Inter, "Inter", sans-serif`;
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    for (const line of wrapText(ctx, subtitleText, w * 0.66).slice(0, 3)) {
+      y += subSize * 1.4;
+      ctx.fillText(line, w / 2, y);
     }
   }
 
@@ -1370,6 +1468,37 @@ export function VideoStudio({
         id,
         { [field]: value } as Partial<VideoScene>,
         { kind: "edit", key: `${id}:${field}` },
+      );
+    },
+    [applyToScene],
+  );
+
+  /**
+   * Edits one field of the selected scene's snippet, creating the snippet on
+   * first keystroke.
+   *
+   * A separate writer rather than `editSceneField(scene.id, "code", {...})` so
+   * each keystroke is one history entry keyed on the snippet's own field: undo
+   * then steps back through `source` instead of jumping the whole snippet.
+   */
+  const editSceneCode = useCallback(
+    (
+      id: string,
+      patch: Partial<SceneCode>,
+      key?: string,
+    ) => {
+      const current = scenesRef.current.find((s) => s.id === id)?.code;
+      const base: SceneCode = current ?? {
+        language: "typescript",
+        source: "",
+        theme: DEFAULT_CODE_THEME,
+        reveal: "all",
+        scale: 1,
+      };
+      applyToScene(
+        id,
+        { code: { ...base, ...patch } },
+        { kind: "edit", key: key ?? `${id}:code` },
       );
     },
     [applyToScene],
@@ -2961,14 +3090,40 @@ export function VideoStudio({
     };
   }, [w, h, scenes]);
 
+  /**
+   * Why the CapCut pack is unavailable, phrased for the export list.
+   *
+   * The pack is a ZIP, and a ZIP needs no encoder. But it no longer holds
+   * stills: it holds one MP4 per scene, so it inherits the MP4 encoder's
+   * limits, and a disabled option with no explanation reads as a bug. This
+   * lives here rather than in the container catalog because it is a fact about
+   * what this editor puts in the pack, not about a container.
+   */
+  const packReason = useMemo<string | null>(() => {
+    if (!support.probed) return null;
+    if (!support.webCodecs) {
+      return "Each scene is exported as an MP4, and this browser has no WebCodecs encoder.";
+    }
+    if (!support.can.mp4) {
+      return "Each scene is exported as an MP4, and this browser cannot encode H.264 for one.";
+    }
+    return null;
+  }, [support.probed, support.webCodecs, support.can.mp4]);
+
   const exportCapCutPack = useCallback(async () => {
     // Scoped to the selected section when the toggle is on: the pack is a
-    // sequence of stills in order, and a pack that silently starts at scene 20
+    // sequence of clips in order, and a pack that silently starts at scene 20
     // would be a sequence with a hole in it.
     const list = scenesForExport;
-    setStatus("Rendering scene frames…");
+    if (list.length === 0) {
+      setStatus("There is nothing to export yet.");
+      return;
+    }
+    stopPlayback();
+    setStatus(`Encoding ${list.length} scene${list.length === 1 ? "" : "s"} as MP4…`);
     const zip = new JSZip();
-    // One still per scene, so each frame shows the first cue of its scene.
+    // Cues for the whole run, so each clip can be painted with the words that
+    // belong to its own slice of the timeline.
     const cues = buildTimelineCues(
       list.map((s) => ({
         narration: s.narration,
@@ -2976,12 +3131,6 @@ export function VideoStudio({
         regions: s.audio?.regions ?? null,
       })),
     );
-    const firstCueOfScene = (index: number): SubtitleCue | null => {
-      const start = list
-        .slice(0, index)
-        .reduce((acc, s) => acc + s.duration, 0);
-      return cueAt(cues, start);
-    };
     const rows = [
       [
         "#",
@@ -2992,24 +3141,29 @@ export function VideoStudio({
         "Duration (s)",
         "Transition",
         "Narration",
-        "Audio file",
-        "Audio start (s)",
-        "Audio length (s)",
-        // CapCut has both a volume slider and a mute toggle per clip, so the
-        // pack carries both rather than baking a decision the user cannot undo.
-        "Audio volume",
-        "Audio muted",
+        // The clip carries its own voice-over, already mixed at the scene's own
+        // volume and mute state, so the editor has nothing left to do with it.
+        "Audio in clip",
       ],
     ];
-    /** Filenames of the clips actually written, so the CSV cannot point at nothing. */
-    const audioFiles = new Map<number, string>();
+    let clipsWithAudio = 0;
+    // One offscreen canvas for every clip: the frames are the same size, and a
+    // fresh canvas per scene only buys the encoder a second to forget.
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      setStatus("This browser would not give the exporter a canvas to draw on.");
+      return;
+    }
+
     for (let i = 0; i < list.length; i++) {
       const scene = list[i];
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) continue;
+      const fileBase = `${String(i + 1).padStart(2, "0")}_${slugify(scene.kicker)}`;
+      const sceneStart = list
+        .slice(0, i)
+        .reduce((acc, s) => acc + s.duration, 0);
       let image: HTMLImageElement | null = null;
       const src = scene.imageKey ? images[scene.imageKey] : undefined;
       if (src) {
@@ -3019,71 +3173,68 @@ export function VideoStudio({
           image = null;
         }
       }
-      const stillCue = subtitlesOn ? firstCueOfScene(i) : null;
-      paintScene(
-        ctx,
-        w,
-        h,
-        scene,
-        1,
-        brand,
-        image,
-        stillCue,
-        subtitleStyle,
-        // A still has no running clock, so it has to be sampled at a moment
-        // rather than at zero: the cue's own start would catch every word
-        // mid-entrance and print a half-built line into the PNG. Half a second
-        // in, the line is fully arrived and the first words are already being
-        // spoken, which is the frame worth keeping.
-        stillCue ? stillCue.start + 0.5 : 0,
-      );
-      const fileBase = `${String(i + 1).padStart(2, "0")}_${slugify(scene.kicker)}`;
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, "image/png"),
-      );
-      if (blob) zip.file(`scenes/${fileBase}.png`, blob);
 
-      // The dropped clip travels with the pack so CapCut can lay it on the
-      // timeline; the CSV carries its name and where it starts.
-      let audioCell = "";
-      let audioStart = "";
-      let audioLength = "";
-      if (scene.audio) {
-        const clip = await getAudioClip(scene.audio.key);
-        if (clip) {
-          const ext = audioExtension(scene.audio);
-          const audioName = `${fileBase}_${slugify(scene.audio.name)}${ext}`;
-          zip.file(`audio/${audioName}`, clip);
-          audioFiles.set(i, `audio/${audioName}`);
-          audioCell = `audio/${audioName}`;
-          audioStart = String(
-            Math.round(
-              list.slice(0, i).reduce((acc, s) => acc + s.duration, 0) * 100,
-            ) / 100,
-          );
-          audioLength = String(
-            Math.round(Math.min(scene.duration, scene.audio.duration) * 100) /
-              100,
-          );
-        }
+      // Only this scene's own clip, so the mix is the scene and not the run:
+      // buildMixBuffer lays the clips out at absolute times, and a single
+      // scene's slot starts at zero.
+      const audio = await buildMixBuffer([scene]);
+      if (audio) clipsWithAudio++;
+
+      try {
+        const clip = await renderVideoToFile({
+          target: "mp4",
+          canvas,
+          width: w,
+          height: h,
+          duration: scene.duration,
+          audio,
+          paintFrame: (t) => {
+            paintScene(
+              ctx,
+              w,
+              h,
+              scene,
+              t,
+              brand,
+              image,
+              subtitlesOn ? cueAt(cues, sceneStart + t) : null,
+              subtitleStyle,
+              // The word-by-word motion runs on the absolute clock while the
+              // scene's own transition runs on the local one, so both are passed
+              // rather than one being derived from the other.
+              sceneStart + t,
+            );
+          },
+          onProgress: (f) =>
+            setStatus(
+              `Encoding scene ${i + 1} of ${list.length}… ${Math.round(f * 100)}%`,
+            ),
+        });
+        // Stored, not deflated: the payload is already a compressed video, and
+        // running DEFLATE over it would buy nothing for seconds of CPU.
+        zip.file(`scenes/${fileBase}.mp4`, clip.blob, { compression: "STORE" });
+      } catch (error) {
+        setStatus(
+          error instanceof VideoExportError
+            ? `Scene ${i + 1} could not be encoded: ${error.message}`
+            : `Scene ${i + 1} could not be encoded for an unknown reason.`,
+        );
+        return;
       }
 
       rows.push([
         String(i + 1),
-        `${fileBase}.png`,
+        `${fileBase}.mp4`,
         scene.kicker,
         scene.title,
         scene.subtitle,
         String(scene.duration),
         scene.transition,
         scene.narration,
-        audioCell,
-        audioStart,
-        audioLength,
-        String(Math.round(scene.volume * 100) / 100),
-        scene.muted ? "yes" : "no",
+        audio ? "yes" : "no",
       ]);
     }
+
     zip.file(
       "storyboard.csv",
       rows.map((row) => row.map(csvCell).join(",")).join("\n"),
@@ -3099,30 +3250,26 @@ export function VideoStudio({
         "CapCut import pack",
         "------------------",
         "",
-        "1. Drag every PNG inside scenes/ onto the CapCut timeline in numeric order.",
-        "2. Each clip is already sized to the video aspect and tagged in the storyboard.csv:",
-        "   - Duration: seconds to set for the clip",
+        "1. Drag every MP4 inside scenes/ onto the CapCut timeline in numeric order.",
+        "2. Each clip is already sized to the video aspect, already carries its own",
+        "   voice-over, and is tagged in the storyboard.csv:",
+        "   - Duration: the exact length of the clip",
         "   - Transition: which transition to put AFTER the scene",
         "   - Narration: the line this scene speaks",
-        "   - Audio volume / Audio muted: the level and mute state to set on the clip",
-        ...(audioFiles.size > 0
-          ? [
-              "3. Every voice-over you dropped is in audio/. Put each file on the",
-              "   timeline at the start given in the storyboard.csv (Audio start),",
-              "   trimmed to Audio length. They line up with the PNGs by construction.",
-            ]
-          : []),
-        `4. Export your CapCut project at ${w}x${h} to match the resolution used here.`,
+        "   - Audio in clip: yes when the clip already has its voice-over, so do",
+        "     not add the audio again on the timeline",
         ...(cues.length > 0
           ? [
-              "5. subtitles.srt is an editable subtitle track. Import it, then check the",
+              "3. subtitles.srt is an editable subtitle track. Import it, then check the",
               "   timings against the voice-over: they are estimated from the text,",
               "   not measured from the audio.",
             ]
           : []),
+        `4. Export your CapCut project at ${w}x${h} to match the resolution used here.`,
         "",
       ].join("\n"),
     );
+    setStatus("Zipping the clips…");
     const blob = await zip.generateAsync({
       type: "blob",
       compression: "DEFLATE",
@@ -3134,8 +3281,8 @@ export function VideoStudio({
     a.click();
     URL.revokeObjectURL(a.href);
     setStatus(
-      `CapCut pack saved (${list.length} PNGs${
-        audioFiles.size > 0 ? `, ${audioFiles.size} audio files` : ""
+      `CapCut pack saved (${list.length} MP4 clips${
+        clipsWithAudio > 0 ? `, ${clipsWithAudio} with voice-over` : ""
       }${cues.length > 0 ? `, ${cues.length} subtitles` : ""}${
         sectionOnly ? ", this section only" : ""
       }).`,
@@ -3151,6 +3298,8 @@ export function VideoStudio({
     h,
     subtitlesOn,
     subtitleStyle,
+    stopPlayback,
+    buildMixBuffer,
   ]);
 
   /**
@@ -3171,11 +3320,17 @@ export function VideoStudio({
         isVideo: format.isVideo,
         // Gated on `probed` for the same reason the old button was: nothing
         // should be blocked on an answer that has not arrived yet.
-        available: !support.probed || support.can[format.id],
-        reason: unavailableReason(format.id, {
-          webCodecs: support.webCodecs,
-          probed: support.probed,
-        }),
+        available:
+          format.id === "capcut"
+            ? packReason === null
+            : !support.probed || support.can[format.id],
+        reason:
+          format.id === "capcut"
+            ? packReason
+            : unavailableReason(format.id, {
+                webCodecs: support.webCodecs,
+                probed: support.probed,
+              }),
         run: () => {
           // One selector, one action. The project files are written straight to
           // disk; a video is encoded offline and downloaded, so none of them
@@ -3194,6 +3349,7 @@ export function VideoStudio({
       support.probed,
       support.webCodecs,
       support.can,
+      packReason,
       exportJson,
       exportCapCutPack,
       exportVideoFile,
@@ -3611,6 +3767,140 @@ export function VideoStudio({
                     </button>
                   )}
                 </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <Braces className="size-3.5 text-primary" />
+                    Code snippet
+                  </label>
+                  {selectedScene.code && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        editSceneField(selectedScene.id, "code", null)
+                      }
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      title="Remove the snippet and show the title card again"
+                    >
+                      <Trash2 className="size-3" />
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {selectedScene.code ? (
+                  <>
+                    <textarea
+                      value={selectedScene.code.source}
+                      onChange={(e) =>
+                        editSceneCode(
+                          selectedScene.id,
+                          { source: e.target.value },
+                          `${selectedScene.id}:code.source`,
+                        )
+                      }
+                      placeholder="Paste the lines this scene shows"
+                      rows={7}
+                      spellCheck={false}
+                      className="w-full resize-y rounded border bg-background px-2 py-1 font-mono text-[11px] text-foreground outline-none focus:border-ring"
+                      aria-label="Selected scene code snippet"
+                    />
+                    <div className="flex flex-wrap items-center gap-1">
+                      <select
+                        value={selectedScene.code.language}
+                        onChange={(e) =>
+                          editSceneCode(
+                            selectedScene.id,
+                            { language: e.target.value },
+                            `${selectedScene.id}:code.language`,
+                          )
+                        }
+                        className="h-5 rounded border bg-background px-1 text-[10px] outline-none focus:border-ring"
+                        aria-label="Snippet language"
+                      >
+                        {CODE_LANGUAGES.map((language) => (
+                          <option key={language} value={language}>
+                            {language}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={selectedScene.code.theme}
+                        onChange={(e) =>
+                          editSceneCode(
+                            selectedScene.id,
+                            { theme: e.target.value },
+                            `${selectedScene.id}:code.theme`,
+                          )
+                        }
+                        className="h-5 rounded border bg-background px-1 text-[10px] outline-none focus:border-ring"
+                        aria-label="Snippet palette"
+                      >
+                        {CODE_PANEL_THEMES.map((theme) => (
+                          <option key={theme.id} value={theme.id}>
+                            {theme.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={selectedScene.code.reveal}
+                        onChange={(e) =>
+                          editSceneCode(
+                            selectedScene.id,
+                            { reveal: e.target.value as CodeReveal },
+                            `${selectedScene.id}:code.reveal`,
+                          )
+                        }
+                        className="h-5 rounded border bg-background px-1 text-[10px] outline-none focus:border-ring"
+                        aria-label="How the snippet appears"
+                      >
+                        {CODE_REVEALS.map((reveal) => (
+                          <option key={reveal} value={reveal}>
+                            {CODE_REVEAL_LABELS[reveal]}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        Size
+                        <input
+                          type="range"
+                          min={CODE_SCALE_MIN}
+                          max={CODE_SCALE_MAX}
+                          step={0.1}
+                          value={selectedScene.code.scale}
+                          onChange={(e) =>
+                            editSceneCode(
+                              selectedScene.id,
+                              { scale: Number(e.target.value) },
+                              `${selectedScene.id}:code.scale`,
+                            )
+                          }
+                          className="h-1 w-16 accent-primary"
+                          aria-label="Snippet font size"
+                        />
+                      </label>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      editSceneCode(selectedScene.id, {
+                        source: "",
+                        language: "typescript",
+                        theme: DEFAULT_CODE_THEME,
+                        reveal: "all",
+                        scale: 1,
+                      })
+                    }
+                    className="flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-foreground/20 px-2 py-2 text-[11px] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+                  >
+                    <Braces className="size-3.5" />
+                    Show code on this scene
+                  </button>
+                )}
+              </div>
 
                 <div className="rounded border bg-muted/30 p-1.5">
                   <div className="flex items-center gap-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">

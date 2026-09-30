@@ -46,6 +46,7 @@ function scene(
     audio: null,
     volume: 1,
     muted: false,
+    code: null,
   };
 }
 

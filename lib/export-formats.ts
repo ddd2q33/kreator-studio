@@ -80,7 +80,7 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
     extension: "zip",
     videoCodec: null,
     audioCodec: null,
-    hint: "A PNG per scene, subtitles.srt and a storyboard CSV. Not a video.",
+    hint: "An MP4 per scene with its own voice-over, plus subtitles.srt and a storyboard CSV.",
     isVideo: false,
   },
   {
