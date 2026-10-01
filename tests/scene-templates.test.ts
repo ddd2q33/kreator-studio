@@ -73,6 +73,31 @@ describe("scene JSON templates", () => {
     assert.equal(scene?.audio?.key, "clip-replace-me");
   });
 
+  it("the portrait template is a full document with canvas settings", () => {
+    const { document, warnings } = applyTemplate("portrait");
+    assert.deepEqual(warnings, []);
+    assert.equal(document?.version, 1);
+    assert.equal(document?.portrait, true);
+    assert.equal(document?.brand, "#0d9488");
+    assert.equal(document?.subtitleStyleId, "reels");
+    assert.equal(document?.scenes.length, 2);
+  });
+
+  it("the every-field template shows every optional scene field", () => {
+    const { document, warnings } = applyTemplate("all-fields");
+    assert.deepEqual(warnings, []);
+    const scene = document?.scenes[0];
+    assert.equal(scene?.imageFit, "cover");
+    assert.equal(scene?.volume, 0.85);
+    assert.equal(scene?.muted, false);
+    assert.equal(scene?.transition, "zoom");
+    assert.equal(scene?.audio?.regions.length, 2);
+    assert.equal(scene?.code?.reveal, "typed");
+    // The template's own id is authorship, not editor state: the app never
+    // writes ids into the file, but reading one back must not be a warning.
+    assert.equal(scene?.id, "hand-written-scene");
+  });
+
   it("the programming template lands a snippet on each code scene", () => {
     const { document, warnings } = applyTemplate("programming");
     assert.deepEqual(warnings, []);

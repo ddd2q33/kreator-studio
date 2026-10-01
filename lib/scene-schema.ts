@@ -33,6 +33,15 @@ export const DURATION_MAX = 20;
 export const DURATION_DEFAULT = 4;
 /** Generous ceiling for a narration field; nothing uploads it any more. */
 export const NARRATION_MAX = 5000;
+/**
+ * Ceiling for author notes.
+ *
+ * Notes are a scratchpad, not a script, so the limit is tighter than the
+ * narration's: long enough for a page of cut notes, short enough that a scene
+ * carrying one cannot quietly dominate the localStorage quota the whole
+ * timeline shares.
+ */
+export const NOTES_MAX = 2000;
 
 export type Transition = "cut" | "fade" | "zoom" | "pan";
 
@@ -96,6 +105,17 @@ export type SceneAudio = {
    * fall back to being estimated from the text.
    */
   regions: { start: number; end: number }[];
+  /**
+   * The clip drawn as a waveform in the timeline: one loudness per bucket,
+   * 0-100, left to right.
+   *
+   * Measured from the same decode that finds `regions`, so attaching a clip
+   * still reads the file once. Storing it means a reload paints the waveform
+   * without touching the audio bytes at all - the alternative is decoding
+   * every clip on every page load just to draw thumbnails. Empty means the
+   * measurement did not run, and the strip falls back to a plain clip bar.
+   */
+  peaks: number[];
 };
 
 /**
@@ -121,6 +141,30 @@ export type SceneCode = {
   reveal: CodeReveal;
   /** Font size as a fraction of the frame width, before the panel fits it. */
   scale: number;
+  /**
+   * Callout labels pinned to their lines, keyed by 1-based line number.
+   *
+   * A programming video teaches one thing per beat; the label next to the line
+   * is the thing. Keys are strings because JSON objects only have string keys,
+   * and lines are 1-based because that is what the gutter shows the viewer.
+   * Optional so documents written before callouts existed still load; the
+   * normalizer always fills it in.
+   */
+  callouts?: Record<string, string>;
+  /**
+   * Lines kept permanently bright (1-based) while the rest of the snippet dims
+   * once the reveal has passed them — the "look here" beat of an explanation.
+   * Optional for the same reason; the normalizer always fills it in.
+   */
+  focus?: number[];
+  /**
+   * Presentation mode: `single` is one snippet; `diff` shows the rewrite
+   * from `base` to `source`, added lines green, removed red — the shape
+   * every code review UI has taught programmers to read.
+   */
+  mode?: CodeMode;
+  /** The "before" text of a diff scene, read exactly like `source`. */
+  base?: string;
 };
 
 /** How a snippet appears over the life of the scene. */
@@ -132,6 +176,62 @@ export const CODE_SCALE_MIN = 0.4;
 export const CODE_SCALE_MAX = 2;
 /** Longest snippet kept on a scene; a file pasted by accident is a mistake. */
 export const CODE_SOURCE_MAX = 8000;
+
+/** How a snippet is presented on the frame. */
+export const SCENE_CODE_MODES = ["single", "diff"] as const;
+export type CodeMode = (typeof SCENE_CODE_MODES)[number];
+
+/**
+ * A terminal card printed under the snippet: the program's output, the proof
+ * the code runs. Optional; null is a scene without a terminal.
+ */
+export type SceneTerminal = {
+  /** Window title in the header, e.g. `node demo.ts`. */
+  title: string;
+  /** Output lines, printed one by one as the scene plays. */
+  output: string[];
+};
+
+/** Longest output line kept; a wall of logs is a paste, not a teaching beat. */
+export const TERMINAL_LINE_MAX = 120;
+/** Longest output list kept; the card has to stay readable at video size. */
+export const TERMINAL_LINES_MAX = 12;
+
+/**
+ * Repairs a terminal card. Anything that is not text is dropped, not fatal —
+ * a hand-written file with one bad line should still show the other nine.
+ */
+export function normalizeSceneTerminal(input: unknown): {
+  terminal: SceneTerminal | null;
+  warnings: string[];
+} {
+  if (input === undefined || input === null) return { terminal: null, warnings: [] };
+  if (!isRecord(input)) {
+    return { terminal: null, warnings: ["terminal ignored — expected an object"] };
+  }
+  const warnings: string[] = [];
+  const rawLines = Array.isArray(input.output) ? input.output : [];
+  const output: string[] = [];
+  for (const item of rawLines) {
+    if (typeof item !== "string" || item.trim() === "") continue;
+    if (output.length >= TERMINAL_LINES_MAX) {
+      warnings.push(`terminal output trimmed to ${TERMINAL_LINES_MAX} lines`);
+      break;
+    }
+    if (item.length > TERMINAL_LINE_MAX) {
+      warnings.push(`terminal line trimmed to ${TERMINAL_LINE_MAX} chars`);
+    }
+    output.push(item.slice(0, TERMINAL_LINE_MAX));
+  }
+  if (output.length === 0) return { terminal: null, warnings };
+  return {
+    terminal: {
+      title: asText(input.title, "terminal").slice(0, 60) || "terminal",
+      output,
+    },
+    warnings,
+  };
+}
 
 /**
  * The palette a snippet gets when the author does not pick one.
@@ -161,6 +261,15 @@ export type VideoScene = {
   title: string;
   subtitle: string;
   narration: string;
+  /**
+   * Author notes for this scene that live only in the editor.
+   *
+   * These are not spoken, not exported to video and not written to DOCX, so
+   * they are free to capture cut notes, ideas and take numbers without
+   * affecting the output. Stored alongside the scene for round-trips through
+   * the JSON editor and localStorage.
+   */
+  notes: string;
   /** Key into the app's image map (a file name), never a data URL. */
   imageKey: string | null;
   /**
@@ -187,6 +296,13 @@ export type VideoScene = {
    * snippet is simply a title card.
    */
   code: SceneCode | null;
+  /**
+   * Terminal card under the code, or null for a scene without one.
+   *
+   * Optional in the file so older projects load unchanged; the normalizer
+   * always writes a value in memory.
+   */
+  terminal: SceneTerminal | null;
 };
 
 export type SceneDocument = {
@@ -344,13 +460,30 @@ function expandGroupedScene(
 }
 
 /**
+ * Keeps the stored waveform as finite numbers in 0-100, dropping junk.
+ *
+ * Like the regions beside it, `peaks` arrives from a file the author can edit
+ * by hand, so it cannot be trusted to be numbers. A waveform is cosmetic, so
+ * the repair is silent: bad entries become silence and the strip still draws.
+ */
+function normalizePeaks(input: unknown): number[] {
+  if (!Array.isArray(input)) return [];
+  const out: number[] = [];
+  for (const entry of input) {
+    const value = asNumber(entry);
+    if (value === null) continue;
+    out.push(Math.round(Math.max(0, Math.min(100, value))));
+  }
+  return out;
+}
+
+/**
  * Keeps only usable speech regions, in order and non-overlapping.
  *
  * These numbers come from a hand-editable JSON file, so a bad entry must not be
  * able to produce negative spans or a region that starts before the one before
  * it, which would make the word aligner loop or run backwards.
- */
-function normalizeSpeechRegions(input: unknown): { start: number; end: number }[] {
+ */function normalizeSpeechRegions(input: unknown): { start: number; end: number }[] {
   if (!Array.isArray(input)) return [];
   const out: { start: number; end: number }[] = [];
   for (const entry of input) {
@@ -401,6 +534,7 @@ export function normalizeSceneAudio(
       bytes: bytes === null ? 0 : Math.max(0, Math.round(bytes)),
       type: asText(input.type, "audio/mpeg"),
       regions: normalizeSpeechRegions(input.regions),
+      peaks: normalizePeaks(input.peaks),
     },
     warnings: [],
   };
@@ -415,15 +549,86 @@ export function normalizeSceneAudio(
  * dropped rather than kept as an empty card, since a frame with an empty panel
  * is worse than a frame with no panel.
  */
+/**
+ * Repairs a code callout map.
+ *
+ * Keys must be integers naming lines that exist in the snippet and values must
+ * carry text; anything else is dropped with a warning rather than rejected —
+ * a hand-written file with one bad key should still load the other nine.
+ */
+function normalizeCodeCallouts(
+  input: unknown,
+  lineCount: number,
+  warnings: string[],
+): Record<string, string> {
+  if (input === undefined || input === null) return {};
+  if (!isRecord(input)) {
+    warnings.push("code callouts ignored — expected an object of line numbers");
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    const line = Number(key);
+    if (!Number.isInteger(line) || line < 1 || line > lineCount) {
+      warnings.push(`callout "${key}" ignored — not a line in the snippet`);
+      continue;
+    }
+    const text = typeof value === "string" ? value.trim() : "";
+    if (!text) continue; // an empty label is noise, not an error
+    out[String(line)] = text.slice(0, 120);
+  }
+  return out;
+}
+
+/**
+ * Repairs a code focus list: 1-based line numbers that exist in the snippet,
+ * deduplicated and ordered, so the painter iterates a stable list.
+ */
+function normalizeCodeFocus(
+  input: unknown,
+  lineCount: number,
+  warnings: string[],
+): number[] {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) {
+    warnings.push("code focus ignored — expected an array of line numbers");
+    return [];
+  }
+  const out: number[] = [];
+  for (const item of input) {
+    const line = Number(item);
+    if (!Number.isInteger(line) || line < 1 || line > lineCount) {
+      warnings.push(
+        `focus line "${String(item)}" ignored — not a line in the snippet`,
+      );
+      continue;
+    }
+    if (!out.includes(line)) out.push(line);
+  }
+  return out.sort((a, b) => a - b);
+}
+
 export function normalizeSceneCode(
   input: unknown,
 ): { code: SceneCode | null; warnings: string[] } {
+  // Both halves of a diff are read by the same repair path; the shared body
+  // below runs on whichever text is present.
   if (input === undefined || input === null) return { code: null, warnings: [] };
   if (typeof input === "string") {
     const source = input.trim();
     return {
       code: source
-        ? { language: "text", source, theme: DEFAULT_CODE_THEME, reveal: "all", scale: 1 }
+        ? {
+            language: "text",
+            source,
+            theme: DEFAULT_CODE_THEME,
+            reveal: "all",
+            scale: 1,
+            callouts: {},
+            focus: [],
+            mode: "single",
+            base: "",
+          }
         : null,
       warnings: [],
     };
@@ -456,6 +661,19 @@ export function normalizeSceneCode(
     );
   }
 
+  const rawMode = asOptionalText(input.mode);
+  if (rawMode && !(SCENE_CODE_MODES as readonly string[]).includes(rawMode)) {
+    warnings.push(`unknown code mode "${rawMode}" — used "single"`);
+  }
+  const mode: CodeMode =
+    rawMode && (SCENE_CODE_MODES as readonly string[]).includes(rawMode)
+      ? (rawMode as CodeMode)
+      : "single";
+  const rawBase = typeof input.base === "string" ? input.base : "";
+  if (mode === "diff" && rawBase.trim() === "") {
+    warnings.push("diff scene has no base text — shown as a single snippet");
+  }
+
   return {
     code: {
       language: asText(input.language, "text"),
@@ -463,6 +681,10 @@ export function normalizeSceneCode(
       theme: asText(input.theme, DEFAULT_CODE_THEME),
       reveal,
       scale: rawScale === null ? 1 : clamp(rawScale, CODE_SCALE_MIN, CODE_SCALE_MAX),
+      callouts: normalizeCodeCallouts(input.callouts, rawSource.split("\n").length, warnings),
+      focus: normalizeCodeFocus(input.focus, rawSource.split("\n").length, warnings),
+      mode,
+      base: rawBase.slice(0, CODE_SOURCE_MAX),
     },
     warnings,
   };
@@ -540,6 +762,16 @@ export function normalizeScene(
     );
   }
 
+  // Notes keep their line breaks and leading indentation: a checklist pasted
+  // from somewhere else should not come back reformatted, and trimming the
+  // edges is all the repair a scratchpad needs. A non-string becomes empty
+  // rather than "[object Object]".
+  let notes = typeof input.notes === "string" ? input.notes.trim() : "";
+  if (notes.length > NOTES_MAX) {
+    notes = notes.slice(0, NOTES_MAX);
+    warnings.push(`notes are longer than ${NOTES_MAX} chars — trimmed`);
+  }
+
   let imageKey = asOptionalText(input.imageKey);
   if (imageKey && options.imageKeys && !options.imageKeys.includes(imageKey)) {
     warnings.push(`image "${imageKey}" is not in the current image map — cleared`);
@@ -559,6 +791,11 @@ export function normalizeScene(
   const { code, warnings: codeWarnings } = normalizeSceneCode(input.code);
   warnings.push(...codeWarnings);
 
+  const { terminal, warnings: terminalWarnings } = normalizeSceneTerminal(
+    input.terminal,
+  );
+  warnings.push(...terminalWarnings);
+
   return {
     scene: {
       id: asOptionalText(input.id) ?? (options.newId ?? (() => uid("scene-")))(),
@@ -568,6 +805,7 @@ export function normalizeScene(
       title,
       subtitle: asText(input.subtitle, ""),
       narration,
+      notes,
       imageKey,
       imageFit: asImageFit(input.imageFit, DEFAULT_IMAGE_FIT),
       duration,
@@ -576,6 +814,7 @@ export function normalizeScene(
       volume: asGain(input.volume, 1),
       muted: input.muted === true,
       code,
+      terminal,
     },
     warnings: warnings.map((w) => `${label}: ${w}`),
   };

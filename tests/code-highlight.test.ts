@@ -179,6 +179,8 @@ describe("normalizeSceneCode", () => {
       theme: DEFAULT_CODE_THEME,
       reveal: "all",
       scale: 1,
+      callouts: {},
+      focus: [],
     });
     assert.deepEqual(warnings, []);
   });
@@ -197,6 +199,8 @@ describe("normalizeSceneCode", () => {
       theme: "carbon",
       reveal: "typed",
       scale: 1.4,
+      callouts: {},
+      focus: [],
     });
   });
 

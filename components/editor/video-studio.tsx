@@ -18,6 +18,7 @@ import {
   Braces,
   Captions,
   CaseSensitive,
+  Check,
   Clapperboard,
   Clock3,
   Copy,
@@ -34,11 +35,14 @@ import {
   RotateCcw,
   Scissors,
   Square,
+  SquareTerminal,
+  StickyNote,
   Trash2,
   Type,
   Undo2,
   Upload,
   Redo2,
+  Repeat,
   Volume2,
   VolumeX,
   Wand2,
@@ -56,9 +60,11 @@ import {
   CODE_SCALE_MAX,
   CODE_SCALE_MIN,
   DEFAULT_CODE_THEME,
+  SCENE_CODE_MODES,
   SCENE_FORMAT_VERSION,
   TRANSITIONS as TRANSITION_IDS,
   normalizeFirstScene,
+  normalizeSceneTerminal,
   normalizeScenes,
   normalizeSceneDocument,
   normalizeSceneInput,
@@ -69,15 +75,18 @@ import {
   CODE_REVEAL_LABELS,
   paintCodePanel,
 } from "@/lib/code-panel";
+import { paintTerminal } from "@/lib/code-terminal";
 import type {
   CodeReveal,
   ImageFit,
   SceneCode,
   SceneDocument,
+  SceneTerminal,
   Transition,
   VideoScene,
 } from "@/lib/scene-schema";
 import { crossfadeAt, sceneStart, timeForScene } from "@/lib/scene-transition";
+import { NOTES_MAX } from "@/lib/scene-schema";
 import {
   DEFAULT_SCENE_JSON_TEMPLATE_ID,
   SCENE_JSON_TEMPLATES,
@@ -148,7 +157,10 @@ import {
 import {
   detectSpeechRegions,
   frameEnergy,
+  framePeaks,
+  packPeaks,
   splitWords,
+  unpackPeaks,
   FRAME_SECONDS,
   type SpeechRegion,
 } from "@/lib/speech-align";
@@ -167,9 +179,23 @@ import type { Asset } from "@/lib/asset-library";
 import {
   EXPORT_FPS,
   renderVideoToFile,
+  throwIfCancelled,
+  ExportCancelledError,
   VideoExportError,
   webCodecsProbe,
 } from "@/lib/video-export";
+import {
+  DEFAULT_TIMELINE_ZOOM,
+  TIMELINE_ZOOM_LEVELS,
+  cutMarkers,
+  formatTimelineTime,
+  isTimelineZoom,
+  rulerTicks,
+  timelineScale,
+  timeForX,
+  xForTime,
+  type TimelineZoom,
+} from "@/lib/timeline-scale";
 
 export type { VideoScene };
 
@@ -318,12 +344,14 @@ function measureAudioDuration(
  * Returns an empty list rather than throwing when the browser cannot decode, so
  * a failed analysis only costs the word highlight, never the attachment.
  */
-async function analyzeSpeech(file: File): Promise<SpeechRegion[]> {
+async function analyzeClip(
+  file: File,
+): Promise<{ regions: SpeechRegion[]; peaks: number[] }> {
   const Ctor =
     window.AudioContext ??
     (window as unknown as { webkitAudioContext?: typeof AudioContext })
       .webkitAudioContext;
-  if (!Ctor) return [];
+  if (!Ctor) return { regions: [], peaks: [] };
   const ctx = new Ctor();
   try {
     const decoded = await ctx.decodeAudioData(await file.arrayBuffer());
@@ -341,11 +369,18 @@ async function analyzeSpeech(file: File): Promise<SpeechRegion[]> {
       Math.round(decoded.sampleRate * FRAME_SECONDS),
     );
     const energy = frameEnergy(samples, frameSize);
-    return detectSpeechRegions(energy, FRAME_SECONDS, {
-      totalSeconds: decoded.duration,
-    });
+    return {
+      regions: detectSpeechRegions(energy, FRAME_SECONDS, {
+        totalSeconds: decoded.duration,
+      }),
+      // The same mono buffer that produced the regions, reduced to a shape the
+      // timeline can draw. Measuring it here is what keeps attaching a clip to
+      // a single decode; a second pass over the file would double the wait on
+      // a long recording for a picture in the timeline.
+      peaks: packPeaks(framePeaks(samples)),
+    };
   } catch {
-    return [];
+    return { regions: [], peaks: [] };
   } finally {
     void ctx.close().catch(() => {});
   }
@@ -361,6 +396,7 @@ const DEFAULT_SCENE = (): VideoScene => ({
   title: "",
   subtitle: "",
   narration: "",
+  notes: "",
   imageKey: null,
   imageFit: "contain",
   duration: 4,
@@ -369,6 +405,7 @@ const DEFAULT_SCENE = (): VideoScene => ({
   muted: false,
   audio: null,
   code: null,
+  terminal: null,
 });
 
 /**
@@ -471,6 +508,14 @@ const clamp01 = (t: number) => Math.max(0, Math.min(1, t));
  * Shared by the live preview and the file exporter: both need the same answer,
  * and two copies of this loop is how they would drift apart.
  */
+/** Speeds offered by the preview rate picker. Exports always render at 1x. */
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+/**
+ * localStorage key for the selected scene id. Not versioned: an unknown id
+ * resolves to no scene and every consumer treats that as "nothing selected".
+ */
+const SELECTED_SCENE_KEY = "book-studio-video-selected-scene";
+
 function locateScene(
   scenes: readonly VideoScene[],
   time: number,
@@ -978,8 +1023,8 @@ function paintScene(
     return;
   }
 
-  const kick = 0.34 * w;
-  ctx.font = `700 ${Math.round(kick)}px "JetBrains Mono", monospace`;
+  const kick = Math.round(Math.min(w * 0.045, h * 0.042));
+  ctx.font = `700 ${kick}px "JetBrains Mono", monospace`;
   ctx.fillStyle = "rgba(255,255,255,0.85)";
   ctx.textAlign = "center";
   if (kickerText) ctx.fillText(kickerText.toUpperCase(), w / 2, h * 0.42);
@@ -1047,11 +1092,34 @@ function paintSceneCodeFrame(
       h * 0.03;
   }
 
+  let cardBottom = 0;
   paintCodePanel(ctx, w, h, {
     code: scene.code!,
     progress: t,
     reservedBottom: reserved,
+    onLayout: (layout) => {
+      cardBottom = layout.y + layout.h;
+    },
   });
+
+  // The terminal is the proof under the code: it paints only where it fits,
+  // between the bottom of the code card and the top of the subtitle plate. A
+  // card tall enough to leave no room quietly drops it rather than overlapping
+  // either the code or the captions — and because it draws over the code
+  // card's callout column, the captions are repainted on top when both are
+  // on screen, keeping the same paint order as a frame without a terminal.
+  const terminal = scene.terminal;
+  if (terminal && terminal.output.some((line) => line.trim() !== "")) {
+    paintTerminal(ctx, w, h, {
+      terminal,
+      progress: t,
+      bottomLimit: h - reserved,
+      topLimit: cardBottom,
+    });
+    if (subtitle && subtitle.lines.length > 0) {
+      paintSubtitle(ctx, w, h, subtitle, subtitleStyle, now);
+    }
+  }
 
   // Words sit above the card, anchored to the top of the frame. Kicker, title
   // and subtitle are each optional, and the block grows downward from a fixed
@@ -1061,7 +1129,7 @@ function paintSceneCodeFrame(
   ctx.textAlign = "center";
 
   if (kickerText) {
-    ctx.font = `700 ${Math.round(0.052 * w)}px "JetBrains Mono", monospace`;
+    ctx.font = `700 ${Math.round(Math.min(w * 0.045, h * 0.042))}px "JetBrains Mono", monospace`;
     ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.fillText(kickerText.toUpperCase(), w / 2, y);
     y += 0.09 * h;
@@ -1156,6 +1224,168 @@ function TimelineThumb({
   );
 }
 
+/**
+ * The scene's voice-over drawn as a waveform under its thumbnail.
+ *
+ * A card shows the picture, the title and the length; none of that says where
+ * the pauses are. The waveform does, and that is what an author cuts against:
+ * the end of a sentence is the only honest place to put a cut, and hunting for
+ * it by ear on every pass is the slowest part of editing narration.
+ *
+ * Drawn on a canvas rather than as one element per bucket: a long timeline is
+ * dozens of cards, and 64 divs each is thousands of nodes for a decoration.
+ * The strip is only as tall as a few pixels, so the canvas is sized to the
+ * device pixel ratio and left to CSS otherwise.
+ */
+function ClipWaveform({
+  peaks,
+  audioDuration,
+  sceneDuration,
+  muted,
+}: {
+  peaks: readonly number[];
+  /** Length of the clip, which may be longer than the scene that plays it. */
+  audioDuration: number;
+  /** Length of the scene; the clip is cut off at the end when shorter. */
+  sceneDuration: number;
+  muted: boolean;
+}) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 160;
+    const h = canvas.clientHeight || 18;
+    canvas.width = Math.max(1, Math.round(w * dpr));
+    canvas.height = Math.max(1, Math.round(h * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (peaks.length === 0) return;
+
+    // The lane is as wide as the scene, so the clip has to be drawn across the
+    // share of it that is actually heard. Two cases matter and they are not the
+    // same: a scene shorter than its clip plays only the opening, and a scene
+    // longer than its clip goes quiet before the card ends. Either way the lane
+    // is the scene, so the waveform is placed inside it rather than stretched
+    // over it - a strip drawn edge to edge would claim audio plays where it
+    // does not, which is exactly the mistake the author would cut on.
+    const audible = Math.min(audioDuration, Math.max(sceneDuration, 0));
+    const span = sceneDuration > 0 ? Math.max(0, Math.min(1, audible / sceneDuration)) : 1;
+    const waveWidth = w * span;
+    if (waveWidth <= 0) return;
+
+    ctx.fillStyle = muted ? "rgba(120,120,130,0.5)" : "rgba(52,211,153,0.85)";
+    const mid = h / 2;
+    const barWidth = waveWidth / peaks.length;
+    // Unpacked once, not per bar: this runs for every card in the strip, and
+    // re-walking the array inside the loop would make it quadratic.
+    const levels = unpackPeaks(peaks);
+    for (let i = 0; i < levels.length; i++) {
+      // A silent bucket still gets a hairline, so "quiet" reads as a flat
+      // waveform rather than as missing data.
+      const barHeight = Math.max(1, (levels[i] ?? 0) * (h - 2));
+      ctx.fillRect(
+        i * barWidth,
+        mid - barHeight / 2,
+        Math.max(1, barWidth - 0.5),
+        barHeight,
+      );
+    }
+  }, [peaks, audioDuration, sceneDuration, muted]);
+  if (peaks.length === 0) return null;
+  return <canvas ref={ref} className="h-[18px] w-full" aria-hidden />;
+}
+
+/** Row used by CalloutRows: which line is labelled, and what the label says. */
+type CalloutRowData = { line: number; text: string; focused: boolean };
+
+/**
+ * Per-line teaching controls for a code scene.
+ *
+ * One row per snippet line: type a label and that line gets a callout pill in
+ * the video; tap the dot and the line joins the spotlight while everything
+ * else steps back. Rows live in the scene's `code.callouts` / `code.focus`,
+ * so they survive round-trips through the JSON editor like every other field.
+ */
+function CalloutRows({
+  callouts,
+  focus,
+  lineCount,
+  onChange,
+}: {
+  callouts: Record<string, string>;
+  focus: number[];
+  lineCount: number;
+  onChange: (callouts: Record<string, string>, focus: number[]) => void;
+}) {
+  const rows: CalloutRowData[] = [];
+  for (let i = 1; i <= lineCount; i++) {
+    rows.push({
+      line: i,
+      text: callouts[String(i)] ?? "",
+      focused: focus.includes(i),
+    });
+  }
+
+  const commit = (nextCallouts: Record<string, string>, nextFocus: number[]) =>
+    onChange(nextCallouts, nextFocus);
+
+  const setLabel = (line: number, text: string) => {
+    const next = { ...callouts };
+    if (text.trim() === "") delete next[String(line)];
+    else next[String(line)] = text;
+    commit(next, focus);
+  };
+
+  const toggleFocus = (line: number) => {
+    const next = focus.includes(line)
+      ? focus.filter((f) => f !== line)
+      : [...focus, line].sort((a, b) => a - b);
+    commit(callouts, next);
+  };
+
+  if (lineCount === 0) return null;
+  return (
+    <div
+      className="mt-1 space-y-0.5"
+      aria-label="Callouts and focus, one row per line"
+    >
+      {rows.map((row) => (
+        <div key={row.line} className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => toggleFocus(row.line)}
+            className={cn(
+              "flex size-4 shrink-0 items-center justify-center rounded-full border text-[9px] leading-none",
+              row.focused
+                ? "border-amber-400 bg-amber-400/20 text-amber-300"
+                : "border-foreground/25 text-muted-foreground hover:border-ring hover:text-foreground",
+            )}
+            title={
+              row.focused
+                ? "Line in the spotlight — click to release it"
+                : "Spotlight this line; the rest steps back (for reveal: all)"
+            }
+            aria-pressed={row.focused}
+            aria-label={`Spotlight line ${row.line}`}
+          >
+            {row.line}
+          </button>
+          <input
+            value={row.text}
+            onChange={(e) => setLabel(row.line, e.target.value)}
+            placeholder={"Label…"}
+            className="h-5 min-w-0 flex-1 rounded border bg-background px-1.5 text-[10px] outline-none focus:border-ring"
+            aria-label={`Callout label for line ${row.line}`}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function VideoStudio({
   chapters,
   images,
@@ -1190,7 +1420,29 @@ export function VideoStudio({
   const redoScenes = useCallback(() => setHistory(redo), []);
   const canUndoScenes = canUndo(history);
   const canRedoScenes = canRedo(history);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * The scene selected when the editor was last closed. The timeline is read
+   * synchronously from storage (loadScenes), so the id can be hydrated right
+   * here; a stale id from an older session matches nothing and is simply
+   * ignored by everything that resolves it against `scenes`.
+   */
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return window.localStorage.getItem(SELECTED_SCENE_KEY);
+    } catch {
+      return null;
+    }
+  });
+  useEffect(() => {
+    try {
+      const persistable = scenes.some((s) => s.id === selectedId) ? selectedId : null;
+      if (persistable === null) window.localStorage.removeItem(SELECTED_SCENE_KEY);
+      else window.localStorage.setItem(SELECTED_SCENE_KEY, String(persistable));
+    } catch {
+      /* non-critical */
+    }
+  }, [scenes, selectedId]);
   const [brand, setBrand] = useState(DEFAULT_BRAND);
   const [portrait, setPortrait] = useState(true);
   const [resolution, setResolution] = useState<string>("1080p");
@@ -1255,6 +1507,23 @@ export function VideoStudio({
     () => subtitleStyleById(subtitleStyleId),
     [subtitleStyleId],
   );
+  /** Zoom of the timeline strip, in px per second. Persisted like the rest. */
+  const [timelineZoom, setTimelineZoom] = useState<TimelineZoom>(() => {
+    if (typeof window === "undefined") return DEFAULT_TIMELINE_ZOOM;
+    try {
+      const raw = Number(window.localStorage.getItem("book-studio-timeline-zoom"));
+      return isTimelineZoom(raw) ? raw : DEFAULT_TIMELINE_ZOOM;
+    } catch {
+      return DEFAULT_TIMELINE_ZOOM;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("book-studio-timeline-zoom", String(timelineZoom));
+    } catch {
+      /* non-critical */
+    }
+  }, [timelineZoom]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenBlocked, setFullscreenBlocked] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -1356,6 +1625,18 @@ export function VideoStudio({
     () => scenes.reduce((acc, s) => acc + s.duration, 0),
     [scenes],
   );
+
+  /** One shared time↔pixel mapping for the ruler, the cards and the needle. */
+  const timeline = useMemo(() => timelineScale(scenes, timelineZoom), [scenes, timelineZoom]);
+  const rulerTicksMemo = useMemo(
+    () => rulerTicks(timeline),
+    [timeline],
+  );
+  const cutMarks = useMemo(() => cutMarkers(timeline), [timeline]);
+  /** Px from the left of the strip where the playhead sits. */
+  const needleX = useMemo(() => xForTime(timeline, playhead), [timeline, playhead]);
+  /** Drag state of the needle, so the pointer handlers can share one closure. */
+  const draggingNeedle = useRef(false);
 
   /**
    * Narration is already written on every scene, so the cues only need the
@@ -1494,12 +1775,31 @@ export function VideoStudio({
         theme: DEFAULT_CODE_THEME,
         reveal: "all",
         scale: 1,
+        callouts: {},
+        focus: [],
       };
       applyToScene(
         id,
         { code: { ...base, ...patch } },
         { kind: "edit", key: key ?? `${id}:code` },
       );
+    },
+    [applyToScene],
+  );
+
+  /**
+   * Edits the selected scene's terminal card, creating it on first keystroke.
+   *
+   * Its own history key, same reason as `editSceneCode`: undo walks back
+   * through the terminal's text, not through the whole scene.
+   */
+  const editSceneTerminal = useCallback(
+    (id: string, patch: Partial<SceneTerminal>) => {
+      const current =
+        scenesRef.current.find((s) => s.id === id)?.terminal ??
+        { title: "", output: [] };
+      const next = normalizeSceneTerminal({ ...current, ...patch });
+      applyToScene(id, { terminal: next }, { kind: "edit", key: `${id}:terminal` });
     },
     [applyToScene],
   );
@@ -1518,6 +1818,52 @@ export function VideoStudio({
     const stepped = Math.round(raw * 2) / 2;
     return Math.min(DURATION_MAX, Math.max(DURATION_MIN, stepped));
   }, [selectedScene?.narration]);
+
+  /**
+   * Batch edit mode: a checkbox on every scene card and one bar that applies
+   * a look to all of them at once. Selection lives outside the single-selected
+   * scene on purpose — picking scenes to restyle should not drag the playhead
+   * or swap the inspector out from under the author.
+   */
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
+  const toggleBatchMode = useCallback(() => {
+    setBatchMode((on) => {
+      if (on) setBatchSelection(new Set());
+      return !on;
+    });
+  }, []);
+  const toggleBatchScene = useCallback((id: string) => {
+    setBatchSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  // Empty string means "leave this property alone", which is what makes the
+  // bar a la carte: a pass that only recolours does not touch timings.
+  const [batchTheme, setBatchTheme] = useState("");
+  const [batchTransition, setBatchTransition] = useState("");
+  const [batchDuration, setBatchDuration] = useState("");
+  const applyBatchEdit = useCallback(() => {
+    if (batchSelection.size === 0) return;
+    setScenes(
+      (prev) =>
+        prev.map((s) => {
+          if (!batchSelection.has(s.id)) return s;
+          const patch: Partial<VideoScene> = {};
+          if (batchTheme && s.code) patch.code = { ...s.code, theme: batchTheme };
+          if (batchTransition) patch.transition = batchTransition as Transition;
+          const duration = Number(batchDuration);
+          if (batchDuration !== "" && Number.isFinite(duration) && duration > 0)
+            patch.duration = Math.min(20, Math.max(1, duration));
+          return Object.keys(patch).length > 0 ? { ...s, ...patch } : s;
+        }),
+      { kind: "commit" },
+    );
+    setStatus(`Applied to ${batchSelection.size} scene${batchSelection.size === 1 ? "" : "s"}`);
+  }, [batchSelection, batchTheme, batchTransition, batchDuration, setScenes, setStatus]);
 
   const fitDurationToNarration = useCallback(() => {
     if (!selectedScene || narrationSeconds <= 0) return;
@@ -1831,12 +2177,14 @@ export function VideoStudio({
       setStatus(`Reading "${file.name}"…`);
       let duration = 0;
       let regions: SpeechRegion[] = [];
+      let peaks: number[] = [];
       let alignedByTranscript = false;
       try {
         duration = (await measureAudioDuration(file)).duration;
-        // Decode a second time to find the pauses. Worth it: it is what lets
-        // the subtitles follow the real voice instead of a guess.
-        regions = await analyzeSpeech(file);
+        // One more pass over the file: the pauses for the subtitles, and the
+        // shape for the waveform. Both come out of the same decode, so the
+        // second read buys both rather than one at a time.
+        ({ regions, peaks } = await analyzeClip(file));
       } catch (error) {
         setStatus(
           error instanceof Error
@@ -1903,6 +2251,7 @@ export function VideoStudio({
           bytes: file.size,
           type: file.type || "audio/mpeg",
           regions,
+          peaks,
         },
         duration: targetSceneDuration(
           scenesRef.current.find((s) => s.id === sceneId)?.duration ?? 4,
@@ -2007,6 +2356,20 @@ export function VideoStudio({
    * synthesis for a scene that has narration but no clip, so a draft still
    * makes noise before any file is recorded.
    */
+  /**
+   * Preview speed. Ref on purpose: the render frame computes the clock with it
+   * every frame, and pausing must not be required to change speed.
+   */
+  const rateRef = useRef(1);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const setRate = useCallback((next: number) => {
+    const clamped = Math.min(2, Math.max(0.5, next));
+    rateRef.current = clamped;
+    setPlaybackRate(clamped);
+  }, []);
+  /** Current shuttle gear (1 = parked). Lives with the rate it drives. */
+  const shuttleRef = useRef(1);
+
   const playSceneAudio = useCallback(
     (idx: number) => {
       const scene = scenesRef.current[idx];
@@ -2016,7 +2379,10 @@ export function VideoStudio({
       if (!scene.audio) {
         if (scene.narration && "speechSynthesis" in window) {
           const u = new SpeechSynthesisUtterance(scene.narration);
-          u.rate = 1.02;
+          // The voice-over rides the preview clock, so at 0.5x it plays
+          // half-speed and at 2x it is rushed — anything else desyncs it
+          // from the pictures it is narrating.
+          u.rate = 1.02 * rateRef.current;
           window.speechSynthesis.speak(u);
         }
         return;
@@ -2041,6 +2407,9 @@ export function VideoStudio({
           return;
         }
         el.currentTime = 0;
+        // Same clock as the visuals: a clip left at 1x would run long past
+        // its scene at 2x preview speed and stop early at 0.5x.
+        el.playbackRate = rateRef.current;
         // The clip element is shared between scenes, so the volume is set on
         // every play rather than once at creation: a quieter scene must not
         // leave the louder setting behind for the next one.
@@ -2049,7 +2418,7 @@ export function VideoStudio({
         activeClipRef.current = el;
       });
     },
-    [getClip, setStatus, stopClip],
+    [getClip, rateRef, setStatus, stopClip],
   );
 
   /** Releases every object URL; called when the editor unmounts. */
@@ -2173,6 +2542,128 @@ export function VideoStudio({
   const pausedAtRef = useRef<number | null>(null);
   const previewOnlyRef = useRef(false);
   const lastEmitMsRef = useRef(-1);
+
+  /**
+   * Puts the playhead on `seconds` of the timeline.
+   *
+   * The preview runs on one clock: `renderFrame` reads the elapsed time as
+   * `(now - playStart) / 1000 * rate`, so the rate divides out when going the
+   * other way. Every seek, pause and resume goes through here, because the
+   * arithmetic was being open-coded in five places and four of them forgot the
+   * rate - which is why scrubbing at 2x used to land the playhead at twice the
+   * place the author clicked.
+   *
+   * `pause` is separate because it has to *read* the position rather than set
+   * it, and reading it without the rate is the same mistake in the other
+   * direction.
+   */
+  const seekClockTo = useCallback((seconds: number) => {
+    const rate = rateRef.current || 1;
+    playStartRef.current = performance.now() - (seconds / rate) * 1000;
+    pausedAtRef.current = seconds;
+    lastEmitMsRef.current = -1;
+  }, []);
+
+  /** Elapsed seconds on the shared clock, honouring the preview rate. */
+  const readClock = useCallback(() => {
+    const rate = rateRef.current || 1;
+    return ((performance.now() - playStartRef.current) / 1000) * rate;
+  }, []);
+  /** Mirrors the playhead state for the rAF-driven step/shuttle helpers. */
+  const playheadRef = useRef(0);
+  useEffect(() => {
+    playheadRef.current = playhead;
+  }, [playhead]);
+  /** Mirrors `playing` for the same helpers, without re-creating them. */
+  const playingRef = useRef(false);
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+  /** Ref on purpose: the render frame reads it without re-subscribing. */
+  const loopRef = useRef(false);
+  const [loop, setLoop] = useState(false);
+  /** Horizontal strip the playhead rides; followed only while previewing. */
+  const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+  /** True while the strip should chase the needle, off the moment the author scrolls. */
+  const [followPlayhead, setFollowPlayhead] = useState(true);
+  /**
+   * Marks a recenter performed by us rather than by the author, so the scroll
+   * event it produces (and browsers fire one for programmatic scrolls too)
+   * does not read as the author grabbing the strip.
+   */
+  const recenteredRef = useRef(false);
+
+  /**
+   * Keeps the playhead in view while the preview runs. The strip can scroll
+   * far past the visible box on a long timeline, and a needle that walks off
+   * the right edge is worse than useless — it stops being a needle. The strip
+   * is followed only on the rAF clock (playing), so scrubbing the ruler or
+   * stepping frames never yanks the scroll, and a manual scroll wins over the
+   * follow until the next play starts.
+   */
+  useEffect(() => {
+    if (!playing || !followPlayhead) return;
+    const strip = timelineScrollRef.current;
+    if (!strip) return;
+    const box = strip.clientWidth;
+    if (needleX < strip.scrollLeft || needleX > strip.scrollLeft + box) {
+      recenteredRef.current = true;
+      strip.scrollLeft = Math.max(
+        0,
+        Math.round(needleX - box / 2),
+      );
+      // The scroll event for a programmatic move fires synchronously, so the
+      // flag can be dropped on the next frame without losing a real user drag.
+      requestAnimationFrame(() => {
+        recenteredRef.current = false;
+      });
+    }
+  }, [playing, followPlayhead, needleX, timelineZoom]);
+  const toggleLoop = useCallback(() => {
+    setLoop((prev) => {
+      loopRef.current = !prev;
+      return !prev;
+    });
+  }, []);
+
+  /**
+   * The window the loop plays in, as absolute seconds.
+   *
+   * The whole video by default, but a section is the unit people actually
+   * re-watch: "did that transition land?". So when the selected scene belongs
+   * to a named run, the loop closes around that run — the playhead rewinds to
+   * the first frame of the section and stops at its last, instead of running
+   * the other seven sections to get back to it. An ungrouped selection has no
+   * section to close around, so it loops the whole timeline.
+   */
+  const loopWindow = useMemo<{ start: number; end: number }>(() => {
+    const whole = { start: 0, end: totalDuration };
+    if (!loop || !selectedId) return whole;
+    const run = runOfScene(scenes, selectedId);
+    if (!run || run.group === null) return whole;
+    const start = scenes
+      .slice(0, run.start)
+      .reduce((acc, s) => acc + s.duration, 0);
+    return { start, end: start + run.duration };
+  }, [loop, selectedId, scenes, totalDuration]);
+  /** Mirrored for the rAF loop, which must not re-subscribe per frame. */
+  const loopWindowRef = useRef(loopWindow);
+  useEffect(() => {
+    loopWindowRef.current = loopWindow;
+  }, [loopWindow]);
+
+  /**
+   * Which section the loop is closed around, for the transport label.
+   *
+   * A loop that silently changes scope is worse than no section loop: the
+   * author presses it expecting the selected section and instead watches the
+   * whole video on repeat. So the button names the scope it will actually use.
+   */
+  const loopSection = useMemo(() => {
+    if (!selectedId) return null;
+    const run = runOfScene(scenes, selectedId);
+    return run && run.group !== null ? run : null;
+  }, [selectedId, scenes]);
 
   const addScene = useCallback(() => {
     let created: VideoScene | null = null;
@@ -2442,7 +2933,7 @@ export function VideoStudio({
       return;
     }
     const total = scenes.reduce((acc, s) => acc + s.duration, 0);
-    const elapsed = (performance.now() - playStartRef.current) / 1000;
+    const elapsed = readClock();
     const emitMs = Math.floor(elapsed * 1000);
     if (emitMs !== lastEmitMsRef.current) {
       lastEmitMsRef.current = emitMs;
@@ -2458,17 +2949,32 @@ export function VideoStudio({
 
     paintTimelineAt(elapsed);
 
-    if (elapsed >= total) {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      previewOnlyRef.current = false;
-      setPlaying(false);
+    const window = loopWindowRef.current;
+    const stopAt = loopRef.current ? window.end : total;
+    if (elapsed >= stopAt) {
+      // Loop rides on this same clock: restarting is just rewinding the one
+      // shared playStart, so preview and loop can never run two clocks that
+      // drift apart. Audio stops anyway at the scene reads below, because the
+      // reload makes locateScene report a new index from scene 0.
+      if (loopRef.current) {
+        // Rewind to the loop window's start, not 0: a section loop begins in
+        // the middle of the timeline, so rewinding the shared clock to 0 would
+        // replay everything before the section.
+        const back = window.start;
+        seekClockTo(back);
+        setPlayhead(back);
+      } else {
+        if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+        previewOnlyRef.current = false;
+        setPlaying(false);
+      }
     } else if (previewOnlyRef.current) {
       previewOnlyRef.current = false;
     } else {
       rafRef.current = requestAnimationFrame(() => frameFnRef.current());
     }
-  }, [playSceneAudio, paintTimelineAt]);
+  }, [loopRef, playSceneAudio, paintTimelineAt, readClock, seekClockTo]);
 
   useEffect(() => {
     frameFnRef.current = renderFrame;
@@ -2477,6 +2983,13 @@ export function VideoStudio({
   // Clamp the playhead when edits shrink the total duration, and repaint the
   // preview after any change while paused — without this the canvas keeps the
   // stale frame (e.g. "Scene 1" showing mid-video after a duration edit).
+  //
+  // Paints only. It used to rebase the shared clock on the selected scene's
+  // start as well, which quietly destroyed the resume point: pausing mid-scene
+  // left `pausedAt` on the scene's first frame, so Resume replayed from the top
+  // of the scene instead of from where the author stopped. The clock belongs to
+  // seekTo / play / pause and to nothing else, and the playhead this returns is
+  // left where the author put it.
   useEffect(() => {
     if (playing) return;
     setPlayhead((prev) => {
@@ -2487,8 +3000,6 @@ export function VideoStudio({
         scenes
           .slice(0, Math.max(0, selectedSceneIndex))
           .reduce((acc, s) => acc + s.duration, 0);
-      playStartRef.current = performance.now() - offset * 1000;
-      pausedAtRef.current = offset;
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext("2d");
       if (canvas && ctx && scenes.length > 0) {
@@ -2536,28 +3047,24 @@ export function VideoStudio({
       const offset =
         scenesRef.current
           .slice(0, sceneIndex)
-          .reduce((acc, s) => acc + s.duration, 0) * 1000;
-      playStartRef.current = performance.now() - offset;
+          .reduce((acc, s) => acc + s.duration, 0);
+      seekClockTo(offset);
       lastSpokenRef.current = sceneIndex - 1;
-      lastEmitMsRef.current = -1;
       setPlaying(true);
       rafRef.current = requestAnimationFrame(renderFrame);
     },
-    [renderFrame, stopPlayback],
+    [renderFrame, seekClockTo, stopPlayback],
   );
 
   const pause = useCallback(() => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
-    const at = Math.max(
-      0,
-      (performance.now() - playStartRef.current) / 1000,
-    );
+    const at = Math.max(0, readClock());
     pausedAtRef.current = at;
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     stopClip();
     setPlaying(false);
-  }, [stopClip]);
+  }, [readClock, stopClip]);
 
   const resume = useCallback(() => {
     const canvas = canvasRef.current;
@@ -2566,7 +3073,7 @@ export function VideoStudio({
       return;
     }
     const at = pausedAtRef.current ?? 0;
-    pausedAtRef.current = null;
+    setFollowPlayhead(true);
     let acc = 0;
     let idx = scenesRef.current.length - 1;
     for (let i = 0; i < scenesRef.current.length; i++) {
@@ -2577,16 +3084,16 @@ export function VideoStudio({
       acc += scenesRef.current[i].duration;
     }
     lastSpokenRef.current = idx - 1;
-    playStartRef.current = performance.now() - at * 1000;
+    seekClockTo(at);
+    pausedAtRef.current = null;
     setPlaying(true);
     rafRef.current = requestAnimationFrame(renderFrame);
-  }, [renderFrame]);
+  }, [renderFrame, seekClockTo]);
 
   const seekTo = useCallback(
     (t: number) => {
       const elapsed = Math.max(0, Math.min(t, totalDuration));
-      pausedAtRef.current = elapsed;
-      playStartRef.current = performance.now() - elapsed * 1000;
+      seekClockTo(elapsed);
       let acc = 0;
       let idx = scenesRef.current.length - 1;
       for (let i = 0; i < scenesRef.current.length; i++) {
@@ -2609,7 +3116,130 @@ export function VideoStudio({
         frameFnRef.current();
       }
     },
-    [playing, renderFrame, stopClip, totalDuration],
+    [playing, renderFrame, seekClockTo, stopClip, totalDuration],
+  );
+
+  /**
+   * Dragging the ruler scrubs the playhead to the pointer. The needle barely
+   * has to move to be useful, so the ruler row is the whole hit surface.
+   */
+  const onRulerPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const box = event.currentTarget.getBoundingClientRect();
+      const seekAt = (clientX: number) => {
+        seekTo(timeForX(timeline, clientX - box.left));
+      };
+      seekAt(event.clientX);
+      const onMove = (move: PointerEvent) => seekAt(move.clientX);
+      const onUp = () => {
+        draggingNeedle.current = false;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+      draggingNeedle.current = true;
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [seekTo, timeline],
+  );
+
+  /**
+   * Moves the preview by exactly one export frame. Stepping is an inspection
+   * gesture, so while playing it parks the video first — otherwise the next
+   * rAF would immediately eat the frame that was just stepped to.
+   */
+  const stepFrame = useCallback(
+    (dir: 1 | -1) => {
+      if (playingRef.current) pause();
+      seekTo(playheadRef.current + dir * (1 / EXPORT_FPS));
+    },
+    [pause, seekTo],
+  );
+
+  /**
+   * Shuttle: L plays forward at increasing speed (1x, 2x — the preview
+   * picker's own ceiling), J scrubs backwards on the same ladder, and K parks
+   * on the exact frame and hands the rate picker its value back. The chosen
+   * preview speed is remembered only while parked, so shuttling never
+   * overwrites it permanently.
+   */
+  const shuttleBackRef = useRef<number | null>(null);
+  const preShuttleRateRef = useRef(1);
+  /** Whether a shuttle run is in progress, as opposed to parked. */
+  const shuttleActiveRef = useRef(false);
+  const shuttleDirRef = useRef<1 | -1>(1);
+  const stopShuttle = useCallback(() => {
+    if (shuttleBackRef.current !== null) {
+      window.clearInterval(shuttleBackRef.current);
+      shuttleBackRef.current = null;
+    }
+    if (shuttleActiveRef.current) {
+      shuttleActiveRef.current = false;
+      shuttleRef.current = 1;
+      setRate(preShuttleRateRef.current);
+    }
+  }, [setRate]);
+  const shuttle = useCallback(
+    (dir: 1 | -1) => {
+      if (shuttleBackRef.current !== null) {
+        window.clearInterval(shuttleBackRef.current);
+        shuttleBackRef.current = null;
+      }
+      // Changing direction restarts the ladder at 1x, like every NLE: mashing
+      // J then L scrubs back, then eases forward — it never jumps to 8x.
+      const turning = shuttleActiveRef.current && shuttleDirRef.current !== dir;
+      if (!shuttleActiveRef.current) {
+        // Engaging: remember the speed the user had picked so K can restore it.
+        preShuttleRateRef.current = rateRef.current;
+      }
+      const speed =
+        !shuttleActiveRef.current || turning
+          ? 1
+          : Math.min(2, shuttleRef.current * 2);
+      shuttleActiveRef.current = true;
+      shuttleDirRef.current = dir;
+      shuttleRef.current = speed;
+      setRate(speed);
+      if (dir === 1) {
+        if (playingRef.current) {
+          // Already rolling: rebase the one shared clock instead of
+          // restarting, so the picture does not blink.
+          seekClockTo(playheadRef.current);
+          return;
+        }
+        stopPlayback();
+        seekClockTo(0);
+        lastSpokenRef.current = -1;
+        setPlaying(true);
+        rafRef.current = requestAnimationFrame(renderFrame);
+        return;
+      }
+      // Backwards playback is not something the frame painter can do
+      // honestly, so J walks the playhead back at the shuttle speed —
+      // scrubbing, but timed like playback.
+      if (playingRef.current) pause();
+      const backward = () => {
+        if (playingRef.current) {
+          // A forward play took over; the scrub stands down.
+          if (shuttleBackRef.current !== null) {
+            window.clearInterval(shuttleBackRef.current);
+            shuttleBackRef.current = null;
+          }
+          return;
+        }
+        const at = playheadRef.current - 0.1 * shuttleRef.current;
+        if (at <= 0) {
+          stopShuttle();
+          seekTo(0);
+          return;
+        }
+        seekTo(at);
+      };
+      backward();
+      shuttleBackRef.current = window.setInterval(backward, 100);
+    },
+    [pause, renderFrame, seekClockTo, seekTo, setRate, stopPlayback, stopShuttle],
   );
 
   const formatTime = useCallback((t: number) => {
@@ -2693,6 +3323,29 @@ export function VideoStudio({
     (index: number) =>
       scenes.slice(0, index).reduce((acc, s) => acc + s.duration, 0),
     [scenes],
+  );
+
+  /**
+   * Nudges the selected scene's duration by half a second per press, or a
+   * full second with Shift — the slider's own 0.5s grid, so a keyboard trim
+   * is always visible on it too. The keyboard is for trimming by ear while
+   * the preview loop runs; the slider still owns precise values.
+   */
+  const nudgeSceneDuration = useCallback(
+    (delta: number) => {
+      const scene = scenes[selectedSceneIndex];
+      if (!scene) return;
+      const next = Math.min(
+        DURATION_MAX,
+        Math.max(DURATION_MIN, Math.round((scene.duration + delta) * 2) / 2),
+      );
+      if (next === scene.duration) return;
+      setScenes(
+        scenes.map((s, i) => (i === selectedSceneIndex ? { ...s, duration: next } : s)),
+        { kind: "commit" },
+      );
+    },
+    [scenes, selectedSceneIndex, setScenes],
   );
 
   const activeSceneIndex = useMemo(() => {
@@ -2789,6 +3442,50 @@ export function VideoStudio({
   );
 
   /**
+   * The export currently running, if any.
+   *
+   * An AbortController rather than a boolean. The render loop is a plain async
+   * function with no way to be told to stop, so it gets a signal it can poll
+   * between frames; `beginExport` hands out that signal's owner and `cancelExport`
+   * is what fires it. State lives in a ref because nothing here re-renders on it:
+   * the status line already reports progress through `setStatus`, and a re-render
+   * per aborted frame would be its own kind of slowdown.
+   */
+  const exportAbortRef = useRef<AbortController | null>(null);
+
+  /**
+   * Claims the single export slot. Returns false when one is already running.
+   *
+   * The busy state that drives the Cancel button lives in the hub, which owns its
+   * own spinner around the promise. Duplicating it here would mean two sources of
+   * truth for the same fact, and they would disagree during the gap where the
+   * encoder is already running but the hub has not yet painted.
+   */
+  const beginExport = useCallback(() => {
+    if (exportAbortRef.current) return false;
+    exportAbortRef.current = new AbortController();
+    return true;
+  }, []);
+
+  /** Releases the slot. Always runs, including on the failure and cancel paths. */
+  const endExport = useCallback(() => {
+    exportAbortRef.current = null;
+  }, []);
+
+  /**
+   * Stops a running export.
+   *
+   * Aborting is enough for the loop to notice; this only says so, because a
+   * status line still reading "Encoding… 47%" after the user pressed Cancel is
+   * how a cancel ends up looking like a hang.
+   */
+  const cancelExport = useCallback(() => {
+    if (!exportAbortRef.current) return;
+    exportAbortRef.current.abort();
+    setStatus("Cancelling…");
+  }, [setStatus]);
+
+  /**
    * Encodes the timeline to a file and hands it to the browser as a download.
    *
    * No playback is involved: every frame is painted and encoded on demand, so
@@ -2810,11 +3507,17 @@ export function VideoStudio({
       setStatus("The timeline is empty, so there is nothing to export.");
       return;
     }
+    // False means an export is already running. The button is disabled for the
+    // same reason, but a keyboard shortcut or a stale click can still land here,
+    // and two encoders writing at once is worse than ignoring the second one.
+    if (!beginExport()) return;
 
     stopPlayback();
     setStatus("Preparing the audio mix…");
+    const signal = exportAbortRef.current?.signal;
     try {
       const audio = await buildMixBuffer(list);
+      throwIfCancelled(signal);
       const format = exportFormat(target);
       setStatus(`Rendering .${format.extension}…`);
       const result = await renderVideoToFile({
@@ -2824,10 +3527,15 @@ export function VideoStudio({
         height: canvas.height,
         duration: total,
         audio,
+        signal,
         paintFrame: (t) => paintTimelineAt(t, list),
         onProgress: (f) =>
           setStatus(`Rendering .${format.extension}… ${Math.round(f * 100)}%`),
       });
+
+// Checked once more, because the gap between the last frame and this line
+      // is where an abort lands that the loop never got to see.
+      throwIfCancelled(signal);
 
       const scope = sectionOnly ? sectionSlug(scenes, selectedId) : "";
       const base = `${fileName.trim() || "book-promo"}${scope}`;
@@ -2838,19 +3546,25 @@ export function VideoStudio({
       URL.revokeObjectURL(a.href);
       setStatus(
         result.audioDropped
-          ? `Saved .${result.extension} without audio: this browser cannot encode ${format.audioCodec}.`
-          : `Saved .${result.extension}${audio ? " with audio" : ""}.`,
+          ? `Saved .${format.extension} without audio: this browser cannot encode ${format.audioCodec}.`
+          : `Saved .${format.extension}${audio ? " with audio" : ""}.`,
       );
     } catch (error) {
       setStatus(
-        error instanceof VideoExportError
-          ? error.message
-          : "The export failed for an unknown reason.",
+        error instanceof ExportCancelledError
+          ? "Export cancelled."
+          : error instanceof VideoExportError
+            ? error.message
+            : "The export failed for an unknown reason.",
       );
+    } finally {
+      endExport();
     }
   },
   [
+    beginExport,
     buildMixBuffer,
+    endExport,
     fileName,
     paintTimelineAt,
     scenes,
@@ -2868,17 +3582,23 @@ export function VideoStudio({
    * Only plays. Export used to ride on this function, capturing the canvas while
    * it ran; it now encodes each frame on demand in `exportVideoFile`, so the
    * transport has no export concern left to carry.
+   *
+   * The "start" is the loop window's start, not always 0. A section loop is a
+   * rehearsal of one section, so pressing play should drop the author on that
+   * section's first frame instead of making them sit through the sections
+   * before it. Off the loop, that is the whole video as before.
    */
   const play = useCallback(async () => {
     if (scenesRef.current.length === 0) return;
     stopPlayback();
-    playStartRef.current = performance.now();
+    setFollowPlayhead(true);
+    const from = loopRef.current ? loopWindowRef.current.start : 0;
+    seekClockTo(from);
     lastSpokenRef.current = -1;
-    setPlayhead(0);
-    lastEmitMsRef.current = -1;
+    setPlayhead(from);
     setPlaying(true);
     rafRef.current = requestAnimationFrame(renderFrame);
-  }, [renderFrame, stopPlayback]);
+  }, [renderFrame, seekClockTo, stopPlayback]);
 
   /**
    * Transport shortcuts. They are ignored while a form control has focus, or
@@ -2886,8 +3606,15 @@ export function VideoStudio({
    */
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable='true']")) {
+      // `e.target` is only an Element when something in the page has focus.
+      // A key event aimed at the document or the window reports those instead,
+      // and `closest` does not exist on them - a throw here would take every
+      // shortcut down with it, so the guard asks what it is before calling it.
+      const target = e.target;
+      if (
+        target instanceof Element &&
+        target.closest("input, textarea, select, [contenteditable='true']")
+      ) {
         return;
       }
 
@@ -2906,6 +3633,27 @@ export function VideoStudio({
         redoScenes();
         return;
       }
+      // Shuttle keys (J back, K park, L forward). Deliberately before the
+      // alt/modifier bail-outs and usable no matter what has focus: shuttle is
+      // exactly what you reach for while scrubbing with one hand on the keys.
+      const lower = e.key.toLowerCase();
+      if (lower === "j" || lower === "k" || lower === "l") {
+        e.preventDefault();
+        if (lower === "k") {
+          if (playing) pause();
+          stopShuttle();
+        } else {
+          shuttle(lower === "l" ? 1 : -1);
+        }
+        return;
+      }
+      // Trim the selected scene's duration with Alt+arrows, before the
+      // generic alt bail-out below. Shift makes the step a full second.
+      if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        nudgeSceneDuration((e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 1 : 0.5));
+        return;
+      }
       if (e.altKey) {
         return;
       }
@@ -2918,6 +3666,7 @@ export function VideoStudio({
       if (e.key === "s" || e.key === "S") {
         e.preventDefault();
         stopPlayback();
+        stopShuttle();
         return;
       }
       if (e.key === " ") {
@@ -2938,22 +3687,51 @@ export function VideoStudio({
         seekTo(playhead - 5);
         return;
       }
+      // Frame stepping. Period steps forward, comma steps back, at exactly
+      // one export frame (1/EXPORT_FPS s) — the finest grain the finished
+      // video actually has, so stepping never hides a frame from review.
+      if (e.key === "," || e.key === ".") {
+        e.preventDefault();
+        stepFrame(e.key === "." ? 1 : -1);
+        return;
+      }
       if (e.key === "Home") {
         e.preventDefault();
         seekTo(0);
+        return;
+      }
+      if (e.key === "End") {
+        e.preventDefault();
+        seekTo(totalDuration);
+        return;
+      }
+      // Delete/Backspace removes the selected scene. Deleting is destructive,
+      // but undo covers it and the selection marks exactly what will go.
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const id = selectedId;
+        if (!id) return;
+        e.preventDefault();
+        removeScene(id);
+        return;
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    nudgeSceneDuration,
     playing,
     pause,
     play,
     playhead,
     redoScenes,
+    removeScene,
     resume,
     seekTo,
+    selectedId,
+    shuttle,
+    stepFrame,
     stopPlayback,
+    stopShuttle,
     toggleFullscreen,
     totalDuration,
     undoScenes,
@@ -3119,8 +3897,14 @@ export function VideoStudio({
       setStatus("There is nothing to export yet.");
       return;
     }
+    if (!beginExport()) return;
+    const signal = exportAbortRef.current?.signal;
     stopPlayback();
     setStatus(`Encoding ${list.length} scene${list.length === 1 ? "" : "s"} as MP4…`);
+    // Counted outside the try, so the cancel path can say how far it got. The
+    // header row is in here too, which is why the message subtracts one.
+    let encoded = 0;
+    try {
     const zip = new JSZip();
     // Cues for the whole run, so each clip can be painted with the words that
     // belong to its own slice of the timeline.
@@ -3159,6 +3943,11 @@ export function VideoStudio({
     }
 
     for (let i = 0; i < list.length; i++) {
+      // Once per scene, not once per frame: inside the encode the render loop
+      // does this 30 times a second. This is the check for the work *around* the
+      // encode - decoding an image, mixing audio - which is where a cancel would
+      // otherwise have to wait for a whole scene to finish before it was seen.
+      throwIfCancelled(signal);
       const scene = list[i];
       const fileBase = `${String(i + 1).padStart(2, "0")}_${slugify(scene.kicker)}`;
       const sceneStart = list
@@ -3178,6 +3967,7 @@ export function VideoStudio({
       // buildMixBuffer lays the clips out at absolute times, and a single
       // scene's slot starts at zero.
       const audio = await buildMixBuffer([scene]);
+      throwIfCancelled(signal);
       if (audio) clipsWithAudio++;
 
       try {
@@ -3188,6 +3978,7 @@ export function VideoStudio({
           height: h,
           duration: scene.duration,
           audio,
+          signal,
           paintFrame: (t) => {
             paintScene(
               ctx,
@@ -3213,7 +4004,9 @@ export function VideoStudio({
         // Stored, not deflated: the payload is already a compressed video, and
         // running DEFLATE over it would buy nothing for seconds of CPU.
         zip.file(`scenes/${fileBase}.mp4`, clip.blob, { compression: "STORE" });
+        encoded++;
       } catch (error) {
+        if (error instanceof ExportCancelledError) throw error;
         setStatus(
           error instanceof VideoExportError
             ? `Scene ${i + 1} could not be encoded: ${error.message}`
@@ -3270,10 +4063,23 @@ export function VideoStudio({
       ].join("\n"),
     );
     setStatus("Zipping the clips…");
-    const blob = await zip.generateAsync({
-      type: "blob",
-      compression: "DEFLATE",
-    });
+    // The zip is assembled even on the cancel path, so it gets its own check.
+    // Deflating a pack of MP4s is CPU-bound work with no awaits of its own to
+    // interrupt, and skipping it is the difference between a cancel that feels
+    // instant and one that still costs the user several seconds.
+    throwIfCancelled(signal);
+    // The progress callback is the second argument, not a property of the options
+    // object: that is JSZip 3.x's signature. Reporting percent from it turns a
+    // silent ten-second wait into something the author can see, and it is also
+    // the only signal that the zip stage is still alive.
+    const blob = await zip.generateAsync(
+      { type: "blob", compression: "DEFLATE" },
+      (meta) => {
+        if (signal?.aborted) return;
+        setStatus(`Zipping the clips… ${Math.round(meta.percent)}%`);
+      },
+    );
+    throwIfCancelled(signal);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     const scope = sectionOnly ? sectionSlug(list, selectedId) : "";
@@ -3287,6 +4093,19 @@ export function VideoStudio({
         sectionOnly ? ", this section only" : ""
       }).`,
     );
+    } catch (error) {
+      // Only a cancel lands here now: every other failure already returned from
+      // inside the loop. Anything else is treated as a cancel so the pack is
+      // never left half-written on disk.
+      if (!(error instanceof ExportCancelledError)) throw error;
+      setStatus(
+        encoded > 0
+          ? `Export cancelled after ${encoded} of ${list.length} scenes. Nothing was saved.`
+          : "Export cancelled. Nothing was saved.",
+      );
+    } finally {
+      endExport();
+    }
   }, [
     scenesForExport,
     sectionOnly,
@@ -3300,6 +4119,8 @@ export function VideoStudio({
     subtitleStyle,
     stopPlayback,
     buildMixBuffer,
+    beginExport,
+    endExport,
   ]);
 
   /**
@@ -3339,17 +4160,25 @@ export function VideoStudio({
             exportJson();
             return;
           }
+          // The project files are instant, so they do not take the slot and are
+          // not blocked by a running encode. Everything that reaches for the
+          // encoder has to go through beginExport or two encodes race.
           if (format.id === "capcut") {
             return exportCapCutPack();
           }
           return exportVideoFile(format.id);
         },
+        // Both video paths share one slot and one controller, so either of them
+        // can stop the other. Without this the hub would offer Cancel for one
+        // target and silently fail to stop it.
+        cancel: format.isVideo || format.id === "capcut" ? cancelExport : undefined,
       })),
     [
       support.probed,
       support.webCodecs,
       support.can,
       packReason,
+      cancelExport,
       exportJson,
       exportCapCutPack,
       exportVideoFile,
@@ -3861,6 +4690,24 @@ export function VideoStudio({
                           </option>
                         ))}
                       </select>
+                      <select
+                        value={selectedScene.code.mode ?? "single"}
+                        onChange={(e) =>
+                          editSceneCode(
+                            selectedScene.id,
+                            { mode: e.target.value as CodeMode },
+                            `${selectedScene.id}:code.mode`,
+                          )
+                        }
+                        className="h-5 rounded border bg-background px-1 text-[10px] outline-none focus:border-ring"
+                        aria-label="Snippet mode"
+                      >
+                        {SCENE_CODE_MODES.map((mode) => (
+                          <option key={mode} value={mode}>
+                            {mode === "diff" ? "Diff" : "Single"}
+                          </option>
+                        ))}
+                      </select>
                       <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
                         Size
                         <input
@@ -3881,6 +4728,84 @@ export function VideoStudio({
                         />
                       </label>
                     </div>
+                    {selectedScene.code.mode === "diff" && (
+                      <textarea
+                        value={selectedScene.code.base ?? ""}
+                        onChange={(e) =>
+                          editSceneCode(
+                            selectedScene.id,
+                            { base: e.target.value },
+                            `${selectedScene.id}:code.base`,
+                          )
+                        }
+                        placeholder="Paste the code as it was BEFORE this scene's change"
+                        rows={5}
+                        spellCheck={false}
+                        className="w-full resize-y rounded border bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground outline-none focus:border-ring"
+                        aria-label="Code before the change (diff base)"
+                      />
+                    )}
+                    <CalloutRows
+                      callouts={selectedScene.code.callouts ?? {}}
+                      focus={selectedScene.code.focus ?? []}
+                      lineCount={selectedScene.code.source.split("\n").length}
+                      onChange={(callouts, focus) =>
+                        editSceneCode(
+                          selectedScene.id,
+                          { callouts, focus },
+                          `${selectedScene.id}:code.teach`,
+                        )
+                      }
+                    />
+                    {selectedScene.code.mode === "diff" && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Callouts and focus target diff rows: added lines count
+                        before removed ones.
+                      </p>
+                    )}
+                    <div className="rounded border bg-muted/20 p-1.5">
+                      <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <SquareTerminal className="size-3 text-primary" />
+                        Terminal output
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedScene.terminal?.title ?? ""}
+                        onChange={(e) =>
+                          editSceneTerminal(selectedScene.id, { title: e.target.value })
+                        }
+                        placeholder="node demo.ts"
+                        className="mt-1 w-full rounded border bg-background px-1.5 py-0.5 font-mono text-[10px] text-foreground outline-none focus:border-ring"
+                        aria-label="Terminal window title"
+                      />
+                      <textarea
+                        value={(selectedScene.terminal?.output ?? []).join("\n")}
+                        onChange={(e) =>
+                          editSceneTerminal(selectedScene.id, {
+                            output: e.target.value.split("\n"),
+                          })
+                        }
+                        placeholder="One output line per row — printed one by one as the scene plays"
+                        rows={4}
+                        spellCheck={false}
+                        className="mt-1 w-full resize-y rounded border bg-background px-1.5 py-1 font-mono text-[10px] text-foreground outline-none focus:border-ring"
+                        aria-label="Terminal output lines"
+                      />
+                      {selectedScene.terminal &&
+                        selectedScene.terminal.output.some((l) => l.trim() !== "") && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              editSceneField(selectedScene.id, "terminal", null)
+                            }
+                            className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            title="Remove the terminal card from this scene's frame"
+                          >
+                            <Trash2 className="size-3" />
+                            Clear terminal
+                          </button>
+                        )}
+                    </div>
                   </>
                 ) : (
                   <button
@@ -3892,6 +4817,11 @@ export function VideoStudio({
                         theme: DEFAULT_CODE_THEME,
                         reveal: "all",
                         scale: 1,
+                        callouts: {},
+                        focus: [],
+                        mode: "single",
+                        base: "",
+                        terminal: null,
                       })
                     }
                     className="flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-foreground/20 px-2 py-2 text-[11px] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
@@ -4048,6 +4978,31 @@ export function VideoStudio({
                     M4A, OGG, Opus or FLAC, up to 100 MB.
                   </p>
                 </div>
+
+                {/* Notes live at the end of the inspector, below the things
+                    that change the video. They are the one field that changes
+                    nothing, and putting them last is what keeps them from
+                    being mistaken for a script field. */}
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <StickyNote className="size-3.5 text-primary" />
+                    Notes
+                    <span className="ml-auto font-mono text-[9px] font-normal normal-case text-muted-foreground/70">
+                      {selectedScene.notes.length}/{NOTES_MAX}
+                    </span>
+                  </label>
+                  <textarea
+                    value={selectedScene.notes}
+                    onChange={(e) =>
+                      editSceneField(selectedScene.id, "notes", e.target.value)
+                    }
+                    placeholder="Cut notes, ideas, take numbers. Never spoken and never exported."
+                    rows={3}
+                    maxLength={NOTES_MAX}
+                    className="w-full resize-none rounded border bg-background px-2 py-1 text-[11px] outline-none focus:border-ring"
+                    aria-label="Selected scene notes"
+                  />
+                </div>
               </div>
             </div>
           ) : (
@@ -4098,6 +5053,7 @@ export function VideoStudio({
               targets={hubTargets}
               defaultId="mp4"
               className="ml-1"
+              onCancel={cancelExport}
             />
           </div>
         </div>
@@ -4201,7 +5157,58 @@ export function VideoStudio({
                   </>
                 )}
               </div>
-              {status && <span className="text-xs text-emerald-400">{status}</span>}
+              {/* Playback niceties. These live with the transport rather than
+                  the inspector because they are things you flip while
+                  watching, not settings you set once. */}
+              <div className="flex items-center gap-1">
+                <Button
+                  onClick={toggleLoop}
+                  variant={loop ? "secondary" : "ghost"}
+                  size="sm"
+                  className="text-zinc-300 hover:bg-white/10 hover:text-white"
+                  disabled={scenes.length === 0}
+                  title={
+                    loopSection
+                      ? `Loop: repeats the “${loopSection.group}” section (${formatTime(loopWindow.start)}–${formatTime(loopWindow.end)})`
+                      : loop
+                        ? "Loop: when the preview reaches the end it starts over"
+                        : "Loop: repeats the selected section, or the whole timeline"
+                  }
+                  aria-pressed={loop}
+                >
+                  <Repeat className="size-3.5" />
+                  Loop
+                  {loop && loopSection && (
+                    <span className="max-w-24 truncate font-mono text-[0.7rem] text-emerald-300">
+                      {loopSection.group}
+                    </span>
+                  )}
+                </Button>
+                <select
+                  value={playbackRate}
+                  onChange={(e) => {
+                    stopShuttle();
+                    setRate(Number(e.target.value));
+                  }}
+                  className="h-7 rounded-md border border-white/10 bg-black/40 px-1.5 font-mono text-[0.8rem] text-zinc-200"
+                  title="Preview speed — exports always render at 1x"
+                  aria-label="Preview speed"
+                >
+                  {PLAYBACK_RATES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}x
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {status && (
+          // data-export-status so the cancel probe can read the line. The status
+          // is the only place the export reports what it is doing, so anything
+          // testing that behaviour needs a handle on it.
+          <span data-export-status className="text-xs text-emerald-400">
+            {status}
+          </span>
+        )}
               {playing ? (
                 <Button onClick={pause} variant="secondary" size="sm">
                   {/* Bars, not a square: the filled square belongs to Stop, and
@@ -4334,64 +5341,243 @@ export function VideoStudio({
               {formatTime(playhead)} / {formatTime(totalDuration)}
             </span>
           </div>
-          <span className="text-[11px] text-muted-foreground">
-            Click a clip to edit · ↑/↓ reorder
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-muted-foreground">
+              Click a clip to edit · ↑/↓ reorder
+            </span>
+            <div
+              className="flex items-center gap-0.5 rounded border border-foreground/15 bg-background p-0.5"
+              role="group"
+              aria-label="Timeline zoom"
+            >
+              {TIMELINE_ZOOM_LEVELS.map((zoom) => (
+                <button
+                  key={zoom}
+                  type="button"
+                  onClick={() => setTimelineZoom(zoom)}
+                  aria-pressed={timelineZoom === zoom}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 font-mono text-[10px] tabular-nums transition-colors",
+                    timelineZoom === zoom
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {zoom}px
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-        <div className="flex items-stretch gap-0.5 overflow-x-auto p-2">
-          {scenes.map((scene, i) => {
-            const start = scenes
-              .slice(0, i)
-              .reduce((acc, s) => acc + s.duration, 0);
-            const width = Math.max(72, (scene.duration / totalDuration) * 240);
-            const isActive = i === activeSceneIndex;
-            // A group header sits before the first scene of each run of
-            // equal group labels (imported { scene, subscenes } sections).
-            const groupLabel = scene.group?.trim() || null;
-            const startsGroup =
-              groupLabel !== null &&
-              (i === 0 || (scenes[i - 1]?.group?.trim() || null) !== groupLabel);
-            return (
-              <div
-                key={scene.id}
-                draggable
-                onDragStart={(e) => {
-                  // Carries the scene id, not the group: moveRunTo resolves the
-                  // run from it, so a card in a section drags the whole section.
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData(DRAG_SCENE_TYPE, scene.id);
-                  setDraggingId(scene.id);
-                }}
-                onDragEnd={() => {
-                  setDraggingId(null);
-                  setDropTargetId(null);
-                }}
-                onDragOver={(e) => {
-                  const isSceneDrag = e.dataTransfer.types.includes(DRAG_SCENE_TYPE);
-                  if (!isSceneDrag && !e.dataTransfer.types.includes("Files")) {
-                    return;
+        {batchMode && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b bg-amber-500/5 px-3 py-1.5">
+            <span
+              className="font-mono text-[10px] font-semibold tabular-nums text-foreground"
+              aria-live="polite"
+            >
+              {batchSelection.size} selected
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setBatchSelection((prev) =>
+                  prev.size === scenes.length
+                    ? new Set()
+                    : new Set(scenes.map((s) => s.id)),
+                )
+              }
+              className="rounded border border-foreground/20 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Select all scenes for batch edit"
+            >
+              {batchSelection.size === scenes.length ? "Deselect all" : "Select all"}
+            </button>
+            <select
+              value={batchTheme}
+              onChange={(e) => setBatchTheme(e.target.value)}
+              className="h-5 rounded border bg-background px-1 text-[10px] outline-none focus:border-ring"
+              aria-label="Batch snippet palette"
+            >
+              <option value="">Theme (keep)</option>
+              {CODE_PANEL_THEMES.map((theme) => (
+                <option key={theme.id} value={theme.id}>
+                  {theme.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={batchTransition}
+              onChange={(e) => setBatchTransition(e.target.value)}
+              className="h-5 rounded border bg-background px-1 text-[10px] outline-none focus:border-ring"
+              aria-label="Batch scene transition"
+            >
+              <option value="">Transition (keep)</option>
+              {TRANSITIONS.map((tr) => (
+                <option key={tr.id} value={tr.id}>
+                  {tr.label}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={batchDuration}
+              onChange={(e) => setBatchDuration(e.target.value)}
+              placeholder="Duration (s)"
+              min={1}
+              max={20}
+              step={0.5}
+              className="h-5 w-20 rounded border bg-background px-1 font-mono text-[10px] tabular-nums outline-none focus:border-ring"
+              aria-label="Batch scene duration in seconds"
+            />
+            <button
+              type="button"
+              onClick={applyBatchEdit}
+              disabled={batchSelection.size === 0}
+              className="rounded bg-foreground px-2 py-0.5 text-[10px] font-semibold text-background transition-opacity disabled:opacity-40"
+              aria-label="Apply batch edit to selected scenes"
+              title="One undo step covers the whole batch"
+            >
+              Apply
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setBatchMode(false);
+                setBatchSelection(new Set());
+              }}
+              className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Exit batch edit"
+            >
+              Done
+            </button>
+          </div>
+        )}
+        <div
+          ref={timelineScrollRef}
+          className="relative overflow-x-auto"
+          onScroll={() => {
+            // A manual scroll beats the follow: the author is looking at a
+            // region, not chasing the needle. Skip the scroll our own
+            // recenter causes, which would otherwise switch the follow off
+            // one frame after every jump.
+            if (recenteredRef.current) return;
+            setFollowPlayhead(false);
+          }}
+        >
+          <div className="relative min-w-max p-2">
+            {/* Ruler: the whole row scrubs, the ticks are time marks and the
+                cut markers jump to a boundary. */}
+            <div
+              data-ruler
+              onPointerDown={onRulerPointerDown}
+              className="relative h-5 cursor-col-resize touch-none select-none"
+              role="slider"
+              aria-label="Timeline ruler"
+              aria-valuemin={0}
+              aria-valuemax={Math.round(totalDuration * 1000)}
+              aria-valuenow={Math.round(playhead * 1000)}
+              style={{ width: timeline.width }}
+            >
+              {rulerTicksMemo.map((tick) => (
+                <div
+                  key={tick.t}
+                  className={cn(
+                    "absolute bottom-0 -translate-x-1/2",
+                    tick.major ? "h-3" : "h-1.5",
+                  )}
+                  style={{ left: tick.x }}
+                >
+                  <div
+                    className={cn(
+                      "w-px",
+                      tick.major ? "bg-foreground/60" : "bg-foreground/25",
+                    )}
+                  />
+                  {tick.label && (
+                    <div className="absolute -top-1 -translate-x-1/2 font-mono text-[8px] tabular-nums text-muted-foreground">
+                      {tick.label}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {cutMarks.map((mark) => (
+                <button
+                  key={mark.t}
+                  type="button"
+                  onClick={() => {
+                    seekTo(mark.t);
+                    setSelectedId(mark.id);
+                  }}
+                  className="group absolute bottom-0 z-10 -translate-x-1/2 px-0.5"
+                  style={{ left: mark.x }}
+                  aria-label={`Cut at ${formatTimelineTime(mark.t)}`}
+                  title={`Cut at ${formatTimelineTime(mark.t)} · click to jump`}
+                >
+                  <div className="size-0 border-x-[3px] border-b-[5px] border-x-transparent border-b-amber-500 transition-transform group-hover:scale-125" />
+                </button>
+              ))}
+            </div>
+            {/* Playhead needle: rides the same scale as the cards below. */}
+            <div
+              data-needle
+              className="pointer-events-none absolute top-0 bottom-0 z-20 flex -translate-x-1/2 flex-col items-center"
+              style={{ left: needleX }}
+            >
+              <div className="h-2 w-0 border-x-[4px] border-t-[6px] border-x-transparent border-t-emerald-500" />
+              <div className="h-2" />
+              <div className="w-px flex-1 bg-emerald-500" />
+            </div>
+            <div className="mt-0.5 flex items-stretch gap-0.5">
+            {scenes.map((scene, i) => {
+              const clip = timeline.clips[i]!;
+              const start = clip.start;
+              const width = clip.width;
+              const isActive = i === activeSceneIndex;
+              // Group header sits before the first scene of each run.
+              const groupLabel = scene.group?.trim() || null;
+              const startsGroup =
+                groupLabel !== null &&
+                (i === 0 || (scenes[i - 1]?.group?.trim() || null) !== groupLabel);
+              return (
+                <div
+                  key={scene.id}
+                  draggable
+                  onDragStart={(e) => {
+                    // Carries the scene id, not the group: moveRunTo resolves the
+                    // run from it, so a card in a section drags the whole section.
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData(DRAG_SCENE_TYPE, scene.id);
+                    setDraggingId(scene.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggingId(null);
+                    setDropTargetId(null);
+                  }}
+                  onDragOver={(e) => {
+                    const isSceneDrag = e.dataTransfer.types.includes(DRAG_SCENE_TYPE);
+                    if (!isSceneDrag && !e.dataTransfer.types.includes("Files")) {
+                      return;
+                    }
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = isSceneDrag ? "move" : "copy";
+                    setDropTargetId(scene.id);
+                  }}
+                  onDragLeave={() =>
+                    setDropTargetId((id) => (id === scene.id ? null : id))
                   }
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = isSceneDrag ? "move" : "copy";
-                  setDropTargetId(scene.id);
-                }}
-                onDragLeave={() =>
-                  setDropTargetId((id) => (id === scene.id ? null : id))
-                }
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDropTargetId(null);
-                  const dragged = e.dataTransfer.getData(DRAG_SCENE_TYPE);
-                  if (dragged) {
-                    // Dropping on the first half of a card means "before this
-                    // scene"; on the second half, "after". The two halves are
-                    // often the same scene, so position decides.
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const after = e.clientX > rect.left + rect.width / 2;
-                    reorderTo(dragged, after ? i + 1 : i);
-                    return;
-                  }
-                  const file = e.dataTransfer.files?.[0];
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDropTargetId(null);
+                    const dragged = e.dataTransfer.getData(DRAG_SCENE_TYPE);
+                    if (dragged) {
+                      // Dropping on the first half of a card means "before this
+                      // scene"; on the second half, "after". The two halves are
+                      // often the same scene, so position decides.
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const after = e.clientX > rect.left + rect.width / 2;
+                      reorderTo(dragged, after ? i + 1 : i);
+                      return;
+                    }
+                    const file = e.dataTransfer.files?.[0];
                   if (file) dropSceneFile(scene.id, file);
                 }}
                 className={cn(
@@ -4414,7 +5600,11 @@ export function VideoStudio({
                     // overflow-x-auto box, so anything that escapes the card's
                     // box gets clipped by the scroller and the label vanishes
                     // for exactly the runs that are long enough to scroll.
-                    className="absolute top-0 left-0 z-10 max-w-full truncate bg-foreground/85 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider text-background backdrop-blur-sm"
+                    // Stops short of the action row on the right. The label
+                    // outranks the buttons, so a long section name would
+                    // otherwise paint over them and swallow the clicks meant
+                    // for delete.
+                    className="absolute top-0 left-0 z-10 max-w-[calc(100%-5.5rem)] truncate bg-foreground/85 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider text-background backdrop-blur-sm"
                     title={`Section: ${groupLabel}`}
                   >
                     {groupLabel}
@@ -4425,6 +5615,36 @@ export function VideoStudio({
                     <Upload className="size-4" />
                     Drop to apply
                   </div>
+                )}
+                {/* A dot, not the note itself. The card is the place you scan
+                    to find the scene that still needs work, so the only thing
+                    that has to be visible from the strip is *that* a scene has
+                    a note; the text belongs in the inspector where there is
+                    room to read it. */}
+                {scene.notes.trim().length > 0 && (
+                  <span
+                    className="absolute top-1 left-1 z-10 size-1.5 rounded-full bg-amber-400 ring-1 ring-black/40"
+                    title={`Notes: ${scene.notes.trim().slice(0, 120)}`}
+                  />
+                )}
+                {batchMode && (
+                  <button
+                    type="button"
+                    onClick={() => toggleBatchScene(scene.id)}
+                    className="absolute top-1 right-1 z-10 grid size-4 place-items-center rounded-sm border border-foreground/30 bg-background/90 transition-colors hover:border-foreground/60"
+                    style={
+                      batchSelection.has(scene.id)
+                        ? { borderColor: "transparent", backgroundColor: "#f59e0b" }
+                        : undefined
+                    }
+                    aria-pressed={batchSelection.has(scene.id)}
+                    aria-label={`Select scene ${i + 1} for batch edit`}
+                    title="Toggle this scene in the batch selection"
+                  >
+                    {batchSelection.has(scene.id) ? (
+                      <Check className="size-3 text-background" strokeWidth={3} />
+                    ) : null}
+                  </button>
                 )}
                 <button
                   type="button"
@@ -4462,12 +5682,25 @@ export function VideoStudio({
                       )}
                     </div>
                   </div>
+                  {scene.audio && scene.audio.peaks.length > 0 && (
+                    <div className="border-t bg-background px-0 py-0.5">
+                      <ClipWaveform
+                        peaks={scene.audio.peaks}
+                        audioDuration={scene.audio.duration}
+                        sceneDuration={scene.duration}
+                        muted={scene.muted}
+                      />
+                    </div>
+                  )}
                   <div className="flex items-center gap-1 border-t bg-background px-2 py-1">
                     <GripVertical className="size-3 shrink-0 text-muted-foreground" />
+                    {/* flex-1 min-w-0 is what makes the truncate bite: without
+                        the min-w-0 this span keeps its intrinsic width and
+                        shoves the duration off the end of the card instead. */}
                     <span className="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold uppercase text-foreground">
                       {scene.kicker || `Scene ${i + 1}`}
                     </span>
-                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                    <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">
                       {scene.duration.toFixed(0)}s
                     </span>
                   </div>
@@ -4480,7 +5713,7 @@ export function VideoStudio({
                     )}
                   </div>
                 </button>
-                <div className="absolute top-1 right-1 hidden gap-0.5 rounded bg-black/60 p-0.5 group-hover:flex">
+                <div className="absolute top-1 right-1 z-30 hidden gap-0.5 rounded bg-black/75 p-0.5 group-hover:flex group-focus-within:flex">
                   <button
                     type="button"
                     onClick={() => moveScene(scene.id, -1)}
@@ -4545,6 +5778,8 @@ export function VideoStudio({
             <Plus className="size-4" />
             Add clip
           </button>
+          </div>
+          </div>
         </div>
       </div>
       {libraryOpen && (

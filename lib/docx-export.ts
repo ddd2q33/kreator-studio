@@ -124,8 +124,7 @@ const TEMPLATE_CONFIGS: Record<string, TemplateConfig> = {
     headingNumbered: true,
   },
   slate: {
-    accent: "B45309",
-    paperFill: "FFFFFF",
+    accent: "D97706",
     soft: "FFFBEB",
     ink: "0F172A",
     gray: "475569",
@@ -142,6 +141,25 @@ const TEMPLATE_CONFIGS: Record<string, TemplateConfig> = {
     bodyLine: 403,
     chapterKicker: "CHAPTER",
     headingNumbered: true,
+  },
+  medical: {
+    accent: "0F766E",
+    soft: "F2F8F7",
+    ink: "1A2226",
+    gray: "4F6268",
+    codeBg: "143A3A",
+    border: "D9E5E1",
+    serif: "Georgia",
+    sans: "Source Sans 3",
+    mono: "IBM Plex Mono",
+    runningHeader: true,
+    bodySize: 22,
+    bodyLine: 403,
+    chapterKicker: "CHAPTER",
+    headingNumbered: true,
+    codeInk: "D7ECE7",
+    codeLangInk: "0F766E",
+    codeLangFill: "0E2F2E",
   },
   cybersec: {
     accent: "0D9488",
@@ -622,6 +640,8 @@ export function suggestedFilename(markdown: string): string {
     .find((line) => /^#{1,6}\s+/.test(line));
   const raw = heading ? heading.replace(/^#{1,6}\s*/, "") : "document";
   const slug = raw
+    .normalize("NFKD")
+    .replace(/[^\u0300-\u036f]/g, "")
     .replace(/[*_`]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -1871,8 +1891,12 @@ const langEl = firstClass(element.children, "code-lang");
         }
         const { paragraph, images } = paragraphBlock(node, nextAfterTitle);
         if (paragraph) body.push(paragraph);
-        for (const img of images) {
-          body.push(...(await imageBlocks(img)));
+        if (images.length > 0) {
+          const results = await Promise.all(
+            images.map((img) => imageBlocks(img)),
+          );
+          for (const r of results)
+            for (const p of r) body.push(p);
         }
         return;
       }

@@ -39,6 +39,7 @@ function scene(
     title: "S",
     subtitle: "",
     narration: "",
+    notes: "",
     imageKey: null,
     imageFit: "cover",
     duration,
@@ -47,6 +48,7 @@ function scene(
     volume: 1,
     muted: false,
     code: null,
+    terminal: null,
   };
 }
 

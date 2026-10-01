@@ -106,6 +106,75 @@ const media = {
 };
 
 /**
+ * A whole exported project, exactly the shape "Export JSON" writes: document
+ * settings up top, scenes below. This is the format to paste back if the file
+ * came from this editor, and the only way to set the canvas to portrait or to
+ * pick the subtitle style for the whole timeline in one go.
+ */
+const portraitVideo = {
+  version: 1,
+  brand: "#0d9488",
+  portrait: true,
+  subtitleStyleId: "reels",
+  scenes: [
+    {
+      kicker: "REELS",
+      title: "A portrait short",
+      subtitle: "9:16 canvas, subtitles at the bottom",
+      narration: "Portrait shorts are made for watching with the sound off.",
+      duration: 3,
+      transition: "cut",
+    },
+    {
+      title: "Second beat",
+      subtitle: "Keep it under a minute",
+      narration: "That means the captions carry most of the story.",
+      duration: 4,
+      transition: "cut",
+    },
+  ],
+};
+
+/**
+ * Every optional field a single scene can carry, in one object, so the author
+ * can see the whole vocabulary before reaching for the small examples.
+ */
+const allFields = {
+  id: "hand-written-scene",
+  chapterId: null,
+  group: "Reference",
+  kicker: "REFERENCE",
+  title: "Every field",
+  subtitle: "kicker, title, subtitle and narration are the text layers",
+  narration: "imageFit chooses how the picture fills the 16:9 frame.",
+  imageKey: "img-replace-me",
+  imageFit: "cover",
+  duration: 6,
+  transition: "zoom",
+  volume: 0.85,
+  muted: false,
+  audio: {
+    key: "clip-replace-me",
+    name: "voiceover.wav",
+    duration: 4,
+    bytes: 0,
+    type: "audio/wav",
+    regions: [
+      { start: 0.2, end: 2.1 },
+      { start: 2.6, end: 3.9 },
+    ],
+  },
+  code: {
+    language: "typescript",
+    source: "const theme = palette(project.brand);",
+    theme: "midnight",
+    reveal: "typed",
+    scale: 1.2,
+  },
+  notes: "Editor-only scratchpad: never spoken and never exported.",
+};
+
+/**
  * A teaching section: every subscene carries a snippet, so applying this drops
  * a run of code frames into the timeline instead of a run of title cards.
  *
@@ -155,6 +224,8 @@ const lesson = {
         theme: "midnight",
         reveal: "typed",
         scale: 1.15,
+        callouts: {},
+        focus: [],
       },
     },
     {
@@ -169,6 +240,10 @@ const lesson = {
         theme: "paper",
         reveal: "all",
         scale: 1,
+        // The teaching beat: line 2 is the line the narration is about, so it
+        // is spotlighted and named while the rest of the snippet steps back.
+        callouts: { 2: "caches results" },
+        focus: [2],
       },
     },
     {
@@ -181,7 +256,9 @@ const lesson = {
 
 /**
  * The full set, in the order the picker shows them: simplest first, so the
- * first three options cover every shape and the rest are reference material.
+ * first three options cover every shape and the rest are reference material —
+ * a full project file, one scene with every field, one with media, and one
+ * with every transition.
  */
 export const SCENE_JSON_TEMPLATES: readonly SceneJsonTemplate[] = [
   {
@@ -207,6 +284,18 @@ export const SCENE_JSON_TEMPLATES: readonly SceneJsonTemplate[] = [
     label: "Whole episode",
     hint: "Many sections at once. Appended to the timeline.",
     json: JSON.stringify(episode, null, 2),
+  },
+  {
+    id: "portrait",
+    label: "Portrait short",
+    hint: "Full exported project: 9:16 canvas, caption style, scenes.",
+    json: JSON.stringify(portraitVideo, null, 2),
+  },
+  {
+    id: "all-fields",
+    label: "Scene with every field",
+    hint: "One scene showing every optional field at once.",
+    json: JSON.stringify(allFields, null, 2),
   },
   {
     id: "media",

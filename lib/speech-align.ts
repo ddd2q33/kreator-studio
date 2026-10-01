@@ -58,6 +58,96 @@ export function frameEnergy(
   return out;
 }
 
+/**
+ * Number of buckets a waveform is reduced to when it is measured for storage.
+ *
+ * The strip in the timeline is at most a few hundred pixels wide, so more
+ * resolution than this is thrown away by the canvas that draws it, while a
+ * stored array this size stays small enough to sit in localStorage next to the
+ * scene JSON. Each number is stored as an integer 0-100, so the whole waveform
+ * costs a few hundred bytes of text.
+ */
+export const PEAK_BUCKETS = 64;
+
+/**
+ * Reduces a mono signal to one 0..1 amplitude per bucket, for a waveform.
+ *
+ * Each bucket takes the *peak* absolute sample rather than the RMS, because a
+ * waveform is read as "is there sound here", and a short loud syllable inside an
+ * otherwise quiet stretch should show as a spike, not vanish into an average.
+ * The peak is then damped toward the bucket's RMS so a lone transient does not
+ * draw a full-height bar that misrepresents the loudness of its neighbours.
+ *
+ * The result is normalised against the loudest bucket, so a whispered take
+ * draws as legibly as a shouted one - the author has already set the absolute
+ * level with the scene's volume control, and a waveform that looks flat when
+ * the audio is quiet is useless for finding the pauses. Values are clamped to
+ * 0..1 and an all-silent signal yields all zeros rather than NaN.
+ */
+export function framePeaks(
+  samples: Float32Array,
+  buckets: number = PEAK_BUCKETS,
+): number[] {
+  if (samples.length === 0 || buckets <= 0) return [];
+  const size = Math.max(1, Math.floor(samples.length / buckets));
+  const peaks = new Float32Array(buckets);
+  const rms = new Float32Array(buckets);
+  for (let b = 0; b < buckets; b++) {
+    const base = b * size;
+    if (base >= samples.length) {
+      peaks[b] = 0;
+      rms[b] = 0;
+      continue;
+    }
+    const end = Math.min(samples.length, base + size);
+    let peak = 0;
+    let sum = 0;
+    for (let i = base; i < end; i++) {
+      const v = Math.abs(samples[i] ?? 0);
+      if (v > peak) peak = v;
+      sum += v * v;
+    }
+    const count = Math.max(1, end - base);
+    peaks[b] = peak;
+    // Geometric blend of peak and RMS: keeps transients visible while a
+    // sustained loud passage still reads as loud across its whole width.
+    rms[b] = Math.sqrt(sum / count);
+  }
+  let loudest = 0;
+  for (let b = 0; b < buckets; b++) {
+    const blended = Math.sqrt(peaks[b] * Math.max(rms[b], 1e-6));
+    peaks[b] = blended;
+    if (blended > loudest) loudest = blended;
+  }
+  if (loudest <= 0) return new Array<number>(buckets).fill(0);
+  const out = new Array<number>(buckets);
+  for (let b = 0; b < buckets; b++) {
+    const v = (peaks[b] ?? 0) / loudest;
+    out[b] = Math.max(0, Math.min(1, v));
+  }
+  return out;
+}
+
+/**
+ * Packs peaks as integers 0-100 for storage.
+ *
+ * The strip cannot show more than a hundred levels of loudness, and rounding
+ * here keeps the stored scene JSON an order of magnitude smaller than storing
+ * full-precision floats would - which matters because the whole timeline lives
+ * in localStorage and shares a quota with everything else.
+ */
+export function packPeaks(peaks: readonly number[]): number[] {
+  return peaks.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 100));
+}
+
+/** The inverse of packPeaks, for drawing. Invalid entries become silence. */
+export function unpackPeaks(packed: readonly number[]): number[] {
+  return packed.map((v) => {
+    const n = typeof v === "number" ? v : 0;
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n / 100)) : 0;
+  });
+}
+
 const percentile = (sorted: Float32Array, p: number): number => {
   if (sorted.length === 0) return 0;
   const idx = Math.min(

@@ -5,10 +5,14 @@ import {
   alignWords,
   detectSpeechRegions,
   frameEnergy,
+  framePeaks,
+  packPeaks,
   speechSpan,
   splitWords,
+  unpackPeaks,
   wordWeights,
   FRAME_SECONDS,
+  PEAK_BUCKETS,
 } from "../lib/speech-align.ts";
 
 /**
@@ -276,5 +280,85 @@ describe("alignWords", () => {
       longLen > shortLen,
       `expected the long word to last longer, got ${longLen} vs ${shortLen}`,
     );
+  });
+});
+
+describe("framePeaks", () => {
+  it("returns one value per bucket, all within 0..1", () => {
+    const peaks = framePeaks(new Float32Array(1000).fill(0.5), 16);
+    assert.equal(peaks.length, 16);
+    for (const value of peaks) {
+      assert.ok(value >= 0 && value <= 1, `peak ${value} out of range`);
+    }
+  });
+
+  it("returns nothing for an empty signal or a bad bucket count", () => {
+    assert.deepEqual(framePeaks(new Float32Array(0)), []);
+    assert.deepEqual(framePeaks(new Float32Array(100), 0), []);
+  });
+
+  it("draws silence as flat and a steady tone as full height", () => {
+    const silence = framePeaks(new Float32Array(640), 8);
+    assert.ok(silence.every((v) => v === 0), "silence should be all zero");
+    const tone = framePeaks(new Float32Array(640).fill(0.5), 8);
+    assert.ok(
+      tone.every((v) => v > 0.99),
+      `a constant tone should fill the strip, got ${tone.join(",")}`,
+    );
+  });
+
+  it("normalises a quiet take to the same shape as a loud one", () => {
+    // The same waveform, 100x quieter. The volume control sets the level, so
+    // the strip must not look flat just because the author recorded quietly.
+    const shape = [0, 1, 0.5, 0.25, 0];
+    const loud = framePeaks(Float32Array.from(shape.map((v) => v * 0.8)), 5);
+    const quiet = framePeaks(Float32Array.from(shape.map((v) => v * 0.008)), 5);
+    const near1 = (a: number[], b: number[]) => {
+      a.forEach((v, i) => near(v, b[i]!, 1e-3));
+    };
+    near1(loud, quiet);
+    assert.ok(Math.max(...quiet) > 0.99, "the quiet take should still fill");
+  });
+
+  it("keeps a short transient visible instead of averaging it away", () => {
+    // One loud sample inside an otherwise silent bucket: a peak-based measure
+    // shows it, and that is the whole point of drawing peaks rather than RMS.
+    const samples = new Float32Array(40);
+    samples[0] = 1;
+    const peaks = framePeaks(samples, 4);
+    assert.ok(peaks[0]! > 0, "the transient should register");
+    assert.ok(peaks[1] === 0 && peaks[2] === 0, "silence stays flat");
+  });
+
+  it("defaults to PEAK_BUCKETS", () => {
+    assert.equal(framePeaks(new Float32Array(1000)).length, PEAK_BUCKETS);
+  });
+});
+
+describe("packPeaks / unpackPeaks", () => {
+  it("round-trips a waveform within the 0-100 storage precision", () => {
+    const peaks = framePeaks(new Float32Array(640), 8);
+    const round = unpackPeaks(packPeaks(peaks));
+    assert.equal(round.length, peaks.length);
+    round.forEach((value, i) => near(value, peaks[i]!, 0.01));
+  });
+
+  it("stores integers so the scene JSON stays small", () => {
+    const packed = packPeaks([0, 0.5, 1, 0.123]);
+    assert.deepEqual(packed, [0, 50, 100, 12]);
+    for (const value of packed) assert.equal(Number.isInteger(value), true);
+  });
+
+  it("clamps out-of-range input instead of trusting it", () => {
+    assert.deepEqual(packPeaks([-1, 2]), [0, 100]);
+    assert.deepEqual(unpackPeaks([-5, 150]), [0, 1]);
+  });
+
+  it("reads junk as silence rather than NaN", () => {
+    // The scene JSON is hand-editable, so these arrive as whatever was typed.
+    const round = unpackPeaks([50, "loud", null, undefined, NaN] as never[]);
+    assert.equal(round.length, 5);
+    near(round[0]!, 0.5, 1e-6);
+    assert.ok(round.slice(1).every((v) => v === 0), "junk should be silence");
   });
 });

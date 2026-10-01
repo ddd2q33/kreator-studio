@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { ChevronDown, Circle, Download, Package } from "lucide-react";
+import { ChevronDown, Circle, Download, Package, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -42,6 +42,12 @@ export type ExportTarget = {
   available?: boolean;
   /** Why it is unavailable, shown instead of running. */
   reason?: string | null;
+  /**
+   * Aborts the running export. Only consulted while this target is the busy one,
+   * and optional: the project files write themselves to disk too fast to be worth
+   * cancelling, so they leave it off and the button never appears.
+   */
+  cancel?: () => void;
 };
 
 export function ExportHub({
@@ -50,11 +56,18 @@ export function ExportHub({
   /** Which target to start on; falls back to the first available one. */
   defaultId,
   emptyLabel = "There is nothing to export yet.",
+  /**
+   * Fires when a long export is stopped. The hub owns the button but not the
+   * abort, so it is passed in rather than invented here: a component that only
+   * renders the control must not also decide what stopping the work means.
+   */
+  onCancel,
 }: {
   targets: readonly ExportTarget[];
   className?: string;
   defaultId?: string;
   emptyLabel?: string;
+  onCancel?: () => void;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [chosenId, setChosenId] = useState<string | null>(defaultId ?? null);
@@ -78,6 +91,16 @@ export function ExportHub({
   const busy = busyId !== null;
   const available = chosen.available !== false;
   const disabled = busy || !available;
+  // The button swaps for a stop control only when there is something to stop and
+  // someone has said how. A target without a cancel stays on "Exporting…", which
+  // is honest: the alternative is a button that appears to do something.
+  const cancellable = busy && chosen.cancel !== undefined && onCancel !== undefined;
+  const stop = () => {
+    // Both are optional and either can be absent, so neither is assumed. The
+    // button is only rendered when both exist, which keeps this simple.
+    chosen.cancel?.();
+    onCancel?.();
+  };
 
   const run = async () => {
     if (disabled) return;
@@ -146,7 +169,15 @@ export function ExportHub({
         variant={busy ? "secondary" : "default"}
         size="sm"
         className={cn(busy && "text-amber-600")}
-        title={available ? chosen.hint : (chosen.reason ?? "Not available in this browser.")}
+        title={
+          busy
+            ? cancellable
+              ? "Stop this export"
+              : "Working…"
+            : available
+              ? chosen.hint
+              : (chosen.reason ?? "Not available in this browser.")
+        }
       >
         {busy ? (
           <>
@@ -164,6 +195,24 @@ export function ExportHub({
           </>
         )}
       </Button>
+
+      {/* A separate button, not the export button turning into one. The export
+          button is disabled while the hub is busy, and swapping it for a stop
+          would mean the control the author is trying to hit is the one thing
+          that cannot be clicked. */}
+      {cancellable && (
+        <Button
+          onClick={stop}
+          variant="outline"
+          size="sm"
+          className="gap-1 text-amber-600"
+          aria-label="Cancel export"
+          title="Stop this export"
+        >
+          <X className="size-3.5" />
+          Cancel
+        </Button>
+      )}
     </div>
   );
 }

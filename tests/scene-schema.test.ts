@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_BRAND,
+  NOTES_MAX,
   SCENE_FORMAT_VERSION,
   normalizeFirstScene,
   normalizeScene,
@@ -44,8 +45,44 @@ describe("normalizeSceneAudio", () => {
       bytes: 1235,
       type: "audio/wav",
       regions: [],
+      peaks: [],
     });
     assert.equal(warnings.length, 0);
+  });
+
+  it("keeps a measured waveform and clamps it to 0-100", () => {
+    const { audio } = normalizeSceneAudio({
+      key: "clip-p",
+      peaks: [0, 33.4, 100, 250, -8, 12.6],
+    });
+    // Stored as integers: the strip cannot show more than a hundred levels,
+    // and rounding keeps the scene JSON small enough for localStorage.
+    assert.deepEqual(audio?.peaks, [0, 33, 100, 100, 0, 13]);
+  });
+
+  it("reads junk peaks as silence instead of failing the descriptor", () => {
+    const { audio, warnings } = normalizeSceneAudio({
+      key: "clip-pjunk",
+      regions: [{ start: 0, end: 1 }],
+      peaks: "loud",           // not an array at all
+    });
+    assert.equal(warnings.length, 0, "a bad waveform is cosmetic, not fatal");
+    assert.deepEqual(audio?.peaks, []);
+    // The rest of the descriptor must survive: a waveform problem never costs
+    // the author their clip.
+    assert.equal(audio?.key, "clip-pjunk");
+    assert.deepEqual(audio?.regions, [{ start: 0, end: 1 }]);
+  });
+
+  it("drops non-numeric peaks but keeps the good ones", () => {
+    const { audio } = normalizeSceneAudio({
+      key: "clip-pmix",
+      peaks: [10, null, "20", NaN, 30],
+    });
+    // A numeric string is read as the number it spells, exactly like every
+    // other field in a hand-edited scene: the JSON editor lets you type either.
+    // What cannot be read at all becomes silence.
+    assert.deepEqual(audio?.peaks, [10, 20, 30]);
   });
 
   it("keeps measured speech regions and rounds them", () => {
@@ -127,6 +164,7 @@ describe("normalizeScene", () => {
     assert.equal(scene.kicker, "");
     assert.equal(scene.subtitle, "");
     assert.equal(scene.narration, "");
+    assert.equal(scene.notes, "");
     assert.equal(scene.imageKey, null);
     assert.equal(scene.chapterId, null);
     assert.equal(scene.duration, 4);
@@ -135,10 +173,53 @@ describe("normalizeScene", () => {
     assert.equal(warnings.length, 0);
   });
 
+  it("keeps author notes, including their line breaks", () => {
+    const { scene, warnings } = normalizeScene(
+      { title: "T", notes: "  - cut here\n  - try take 2  " },
+      0,
+      { newId },
+    );
+    // A checklist pasted from a bug report has to come back as a checklist.
+    assert.equal(scene?.notes, "- cut here\n  - try take 2");
+    assert.equal(warnings.length, 0);
+  });
+
+  it("reads junk notes as empty instead of as text", () => {
+    for (const junk of [null, 42, { note: "hi" }, ["a"]]) {
+      const { scene, warnings } = normalizeScene({ title: "T", notes: junk }, 0, {
+        newId,
+      });
+      assert.equal(scene?.notes, "", `notes ${JSON.stringify(junk)} should be empty`);
+      // Notes are a scratchpad; a bad one must never block the scene.
+      assert.equal(warnings.length, 0);
+    }
+  });
+
+  it("trims notes past the limit and says so", () => {
+    const { scene, warnings } = normalizeScene(
+      { title: "T", notes: "x".repeat(NOTES_MAX + 50) },
+      0,
+      { newId },
+    );
+    assert.equal(scene?.notes.length, NOTES_MAX);
+    assert.ok(
+      warnings.some((w) => w.includes("notes")),
+      `expected a note about the trim, got ${warnings.join(" | ")}`,
+    );
+  });
+
+  it("round-trips notes through the scene document", () => {
+    const notes = "speaker wants this shorter\nkeep the pause";
+    const { document } = normalizeSceneDocument(
+      { scenes: [{ title: "T", notes }] },
+      { newId },
+    );
+    assert.equal(document?.scenes[0]?.notes, notes);
+  });
+
   it("keeps a scene with no title as a blank frame and reports it", () => {
     const { scene, warnings } = normalizeScene({ subtitle: "orphan" }, 0, {
-      newId,
-    });
+      newId,    });
     // Scenes are authored blank, so a missing title must not drop the scene:
     // the per-scene JSON editor round-trips through this function.
     assert.notEqual(scene, null);
@@ -836,7 +917,16 @@ describe("code on a scene", () => {
       scale: 1.2,
     };
     const { scene, warnings } = normalizeScene({ title: "A", code }, 0);
-    assert.deepEqual(scene?.code, code);
+    // The fields the author set survive, and the normalizer fills the rest:
+    // callouts and focus from the code-teaching fields, mode and base from the
+    // diff fields. A snippet written before either pair existed still loads.
+    assert.deepEqual(scene?.code, {
+      ...code,
+      callouts: {},
+      focus: [],
+      mode: "single",
+      base: "",
+    });
     assert.deepEqual(warnings, []);
   });
 

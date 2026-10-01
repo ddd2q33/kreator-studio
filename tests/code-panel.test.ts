@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { paintCodePanel } from "../lib/code-panel.ts";
+import { paintCodePanel, type CodeCardLayout } from "../lib/code-panel.ts";
 import { DEFAULT_CODE_THEME, type CodeReveal, type SceneCode } from "../lib/scene-schema.ts";
 
 /**
@@ -29,6 +29,8 @@ type RecordedCall = {
   align: string;
   fillStyle: string;
   strokeStyle: string;
+  /** `globalAlpha` at the time of the call, for the dimming assertions. */
+  alpha: number;
 };
 
 const BLANK: RecordedCall = {
@@ -45,6 +47,7 @@ const BLANK: RecordedCall = {
   align: "",
   fillStyle: "",
   strokeStyle: "",
+  alpha: 1,
 };
 
 function recorder() {
@@ -62,6 +65,7 @@ function recorder() {
     lineWidth: 1,
     textAlign: "left",
     textBaseline: "alphabetic",
+    globalAlpha: 1,
     shadowColor: "transparent",
     shadowBlur: 0,
     shadowOffsetY: 0,
@@ -95,6 +99,7 @@ function recorder() {
         fillStyle: state.fillStyle,
         font: state.font,
         align: state.textAlign,
+        alpha: state.globalAlpha,
       }),
   };
   const ctx: Record<string, unknown> = { ...methods };
@@ -107,7 +112,7 @@ function recorder() {
       },
     });
   }
-  return { ctx: ctx as unknown as CanvasRenderingContext2D, calls };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, calls, bag };
 }
 
 const SNIPPET = [
@@ -137,6 +142,27 @@ const paint = (
   const { ctx, calls } = recorder();
   paintCodePanel(ctx, w, h, { code, progress, reservedBottom });
   return calls;
+};
+
+/**
+ * Paints once and returns the reported card geometry.
+ *
+ * The layout travels in a holder object because TypeScript does not track
+ * assignments made inside a callback to a `let` — the holder's property type
+ * survives, a bare `let` narrows to `null` and every later read is `never`.
+ */
+const captureLayout = (code: SceneCode, progress = 0.5): CodeCardLayout => {
+  const holder: { layout: CodeCardLayout | null } = { layout: null };
+  const { ctx } = recorder();
+  paintCodePanel(ctx, 1080, 1920, {
+    code,
+    progress,
+    onLayout: (l) => {
+      holder.layout = l;
+    },
+  });
+  if (!holder.layout) throw new Error("onLayout was never called");
+  return holder.layout;
 };
 
 const texts = (calls: RecordedCall[]) =>
@@ -305,5 +331,108 @@ describe("reveal", () => {
       assert.ok(counts[i]! >= counts[i - 1]!, `lines went backwards: ${counts.join(", ")}`);
     }
     assert.equal(counts.at(-1), 5);
+  });
+});
+
+describe("callouts", () => {
+  it("draws a label beside the card with the callout text", () => {
+    const { ctx, calls } = recorder();
+    paintCodePanel(ctx, 1080, 1920, {
+      code: snippet({ callouts: { 2: "caches results" } }),
+      progress: 0.5,
+    });
+    assert.ok(
+      calls.some((c) => c.op === "fillText" && c.text === "caches results"),
+      "the label text should be drawn verbatim",
+    );
+  });
+
+  it("reports its geometry through onLayout", () => {
+    const card = captureLayout(snippet({ callouts: { 2: "lookup" } }));
+    assert.equal(card.callouts.length, 1);
+    const box = card.callouts[0]!;
+    // The label sits to the right of the card, vertically inside it.
+    assert.ok(box.x >= card.x + card.w, `label at ${box.x}, card ends ${card.x + card.w}`);
+    assert.ok(box.y >= card.y && box.y <= card.y + card.h);
+    assert.ok(box.anchored, "line 2 is on screen, so the label is anchored");
+  });
+
+  it("narrows the card to make room for the label column", () => {
+    const card = captureLayout(snippet({ callouts: { 1: "a" } }));
+    assert.ok(
+      card.w < 1080 * 0.88,
+      `card is ${card.w}px — a callout should have narrowed it`,
+    );
+    // And the card plus its column still fits the frame.
+    assert.ok(card.x + card.w + card.callouts[0]!.w <= 1080);
+  });
+
+  it("pins a label whose line scrolled off the card to a visible row", () => {
+    const source = Array.from({ length: 200 }, (_, i) => `const value${i} = ${i};`).join("\n");
+    const card = captureLayout(snippet({ source, callouts: { 1: "the very top" } }));
+    assert.ok(card.callouts.length === 1);
+    assert.equal(card.callouts[0]!.anchored, false, "line 1 is scrolled off the card");
+    assert.ok(
+      card.callouts[0]!.y >= card.y && card.callouts[0]!.y <= card.y + card.h,
+      "the label is still inside the card vertically",
+    );
+  });
+
+  it("stacks two labels on the same row instead of overlapping", () => {
+    const card = captureLayout(snippet({ callouts: { 2: "first", 3: "second" } }));
+    assert.equal(card.callouts.length, 2);
+    assert.ok(
+      card.callouts[1]!.y >= card.callouts[0]!.y + card.callouts[0]!.h,
+      `labels at y=${card.callouts[0]!.y} and y=${card.callouts[1]!.y} collide`,
+    );
+  });
+
+  it("draws nothing extra for a scene with no callouts", () => {
+    const calls = paint(snippet());
+    assert.ok(!calls.some((c) => c.op === "fillText" && c.text.includes("results")));
+  });
+});
+
+describe("focus dimming", () => {
+  /** How many text draws went out at reduced alpha, per call. */
+  const dimRows = (code: SceneCode) => {
+    const { ctx, calls } = recorder();
+    paintCodePanel(ctx, 1080, 1920, { code, progress: 0.5 });
+    return calls.filter((c) => c.op === "fillText" && c.alpha < 1).length;
+  };
+
+  it("dims unfocused lines and keeps the spotlight rows full strength", () => {
+    const dimOps = dimRows(snippet({ focus: [2] }));
+    assert.ok(dimOps > 0, "unfocused rows should be drawn dimmed");
+  });
+
+  it("never dims anything without focus lines", () => {
+    assert.equal(dimRows(snippet()), 0);
+  });
+
+  it("never dims the focused row itself", () => {
+    const { ctx, calls } = recorder();
+    paintCodePanel(ctx, 1080, 1920, {
+      code: snippet({ focus: [1] }),
+      progress: 0.5,
+    });
+    // Row 1's gutter number is drawn at full alpha, every dimmed row below it
+    // at the dim level — read from the calls, not from the context, because
+    // the painter sets and restores alpha per row.
+    const one = calls.find(
+      (c) => c.op === "fillText" && c.text === "1" && c.align === "right",
+    );
+    assert.ok(one, "line 1's gutter number was drawn");
+    assert.equal(one!.alpha, 1, "the focused row is at full alpha");
+    const dimmed = calls.filter((c) => c.op === "fillText" && c.alpha < 1);
+    assert.ok(dimmed.length > 0, "the other rows are drawn dimmed");
+    assert.ok(
+      dimmed.every((c) => !/^1$/.test(c.text) || c.align !== "right"),
+      "no dimmed gutter call belongs to the focused line",
+    );
+  });
+
+  it("leaves progressive reveals untouched by dimming", () => {
+    assert.equal(dimRows(snippet({ focus: [2], reveal: "lines" })), 0);
   });
 });

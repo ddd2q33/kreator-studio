@@ -30,7 +30,8 @@ import {
   type VideoCodec,
 } from "mediabunny";
 
-import { hasWebCodecs, exportFormat, type EncodeProbe, type ExportTarget } from "./export-formats";
+import { ExportCancelledError, throwIfCancelled } from "./export-cancel.ts";
+import { hasWebCodecs, exportFormat, type EncodeProbe, type ExportTarget } from "./export-formats.ts";
 
 /** Default frame rate of the exported file. */
 export const EXPORT_FPS = 30;
@@ -83,6 +84,11 @@ export type RenderVideoOptions = {
   paintFrame: (time: number) => void | Promise<void>;
   /** Called with a 0..1 value as the render advances. */
   onProgress?: (fraction: number) => void;
+  /**
+   * Aborts the render. Checked once per frame, which at 30fps means the export
+   * reacts inside a frame's work rather than at the end of the scene.
+   */
+  signal?: AbortSignal;
 };
 
 export type RenderVideoResult = {
@@ -97,6 +103,9 @@ export type RenderVideoResult = {
 };
 
 export class VideoExportError extends Error {}
+
+/** Re-exported so callers get the encoder and its cancel contract from one place. */
+export { ExportCancelledError, throwIfCancelled } from "./export-cancel.ts";
 
 /**
  * The browser's real answer about its encoders, for the export selector.
@@ -164,6 +173,10 @@ export async function renderVideoToFile(
   const videoCodec = format.videoCodec as VideoCodec;
   const audioCodec = format.audioCodec as AudioCodec;
 
+  // Before the capability probe, which is itself an await: an abort during it
+  // would otherwise wait out the probe and then start encoding anyway.
+  throwIfCancelled(options.signal);
+
   if (!(await canEncodeVideo(videoCodec, { width, height }))) {
     throw new VideoExportError(
       `This browser cannot encode ${videoCodec.toUpperCase()}, so a .${format.extension} cannot be produced here.`,
@@ -214,16 +227,23 @@ export async function renderVideoToFile(
 
     await output.start();
     started = true;
+    throwIfCancelled(options.signal);
 
     if (audioSource && options.audio) {
       // Added before the frames: the encoder needs to know the track exists
       // while the output is open, and one contiguous buffer needs no scheduling.
       await audioSource.add(options.audio);
+      throwIfCancelled(options.signal);
     }
 
     const totalFrames = Math.max(1, Math.round(options.duration * fps));
     const frameDuration = 1 / fps;
     for (let i = 0; i < totalFrames; i++) {
+      // Checked per frame, not per scene. At 30fps a four-second scene is 120
+      // checks, so an abort is honoured inside one frame of work. Checking once
+      // per scene would mean waiting out a scene that is already encoding, which
+      // is precisely the wait someone hitting Cancel is trying to avoid.
+      throwIfCancelled(options.signal);
       const time = i * frameDuration;
       await options.paintFrame(time);
       await videoSource.add(time, frameDuration);
@@ -232,6 +252,7 @@ export async function renderVideoToFile(
 
     // finalize() resolves with nothing; the container's own mime type is the one
     // to label the file with, and it matches what was actually written.
+    throwIfCancelled(options.signal);
     await output.finalize();
     const buffer = (output.target as BufferTarget).buffer;
     if (!buffer) {
@@ -248,6 +269,10 @@ export async function renderVideoToFile(
     // after a failed export. Only safe once the output exists, and pointless
     // once it has been finalized, so both are checked rather than assumed.
     if (output && started) await output.cancel().catch(() => {});
+    // A deliberate abort is passed through as itself: wrapping it would report
+    // "the export failed" for something the user asked to stop, and the caller
+    // needs the type to tell the two apart.
+    if (error instanceof ExportCancelledError) throw error;
     throw new VideoExportError(
       error instanceof Error
         ? `The export failed: ${error.message}`

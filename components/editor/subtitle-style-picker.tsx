@@ -27,6 +27,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Captions, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "cn";
 import {
   SUBTITLE_STYLES,
@@ -158,53 +159,44 @@ export function SubtitleStylePicker({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
   const current = subtitleStyleById(value);
 
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
   return (
-    <div ref={rootRef} className="relative">
-      <Button
-        variant="secondary"
-        size="sm"
-        className="h-6 max-w-36 gap-1 px-2 text-[11px]"
-        disabled={disabled}
-        aria-label="Subtitle style template"
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        title={
-          current
-            ? `${current.label} — ${current.description}`
-            : "Subtitle style template"
-        }
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Captions className="size-3.5 shrink-0" />
-        <span className="truncate">{current?.label ?? "Template"}</span>
-        <ChevronDown className="size-3 shrink-0 opacity-60" />
-      </Button>
-
-      {open ? (
-        <div
-          role="listbox"
-          aria-label="Subtitle style templates"
-          className="absolute right-0 top-full z-50 mt-1 max-h-[70vh] w-88 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border bg-background p-2 shadow-lg"
+    // A Popover, not an absolutely positioned div. This control lives in the
+    // inspector's footer, inside a `grid ... overflow-hidden`, so a panel
+    // anchored in place was clipped to whatever the grid happened to show —
+    // measured off screen at x = -41 with its lower half cut off, and the
+    // options inside it were not reachable. The portal renders it in <body>,
+    // outside every clipping ancestor, and Radix flips it above the trigger
+    // when there is not enough room below.
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-6 max-w-36 gap-1 px-2 text-[11px]"
+          disabled={disabled}
+          aria-label="Subtitle style template"
+          title={
+            current
+              ? `${current.label} — ${current.description}`
+              : "Subtitle style template"
+          }
         >
+          <Captions className="size-3.5 shrink-0" />
+          <span className="truncate">{current?.label ?? "Template"}</span>
+          <ChevronDown className="size-3 shrink-0 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        role="listbox"
+        aria-label="Subtitle style templates"
+        align="end"
+        side="top"
+        sideOffset={6}
+        collisionPadding={12}
+        className="max-h-[70vh] w-88 max-w-[calc(100vw-1.5rem)] overflow-y-auto p-2"
+      >
           {SUBTITLE_STYLE_GROUPS.map((group) => (
             <div key={group.label} className="mb-1 last:mb-0">
               <div className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -225,6 +217,20 @@ export function SubtitleStylePicker({
                           // Deliberately stays open: comparing templates by
                           // clicking through them is the whole point of the
                           // previews. Click elsewhere or press Escape to close.
+                        }}
+                        onKeyDown={(e) => {
+                          // A plain button activated with Enter or Space fires a
+                          // click and the panel stays open, which is right. The
+                          // arrow keys are what a listbox is expected to answer
+                          // to, so they move the selection without closing.
+                          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                            e.preventDefault();
+                            const order = SUBTITLE_STYLES.map((s) => s.id);
+                            const at = order.indexOf(value);
+                            const step = e.key === "ArrowDown" ? 1 : -1;
+                            const next = order[(at + step + order.length) % order.length];
+                            if (next) onChange(next);
+                          }
                         }}
                         className={cn(
                           "rounded-md border p-1 text-left transition-colors hover:border-ring",
@@ -257,8 +263,7 @@ export function SubtitleStylePicker({
               </div>
             </div>
           ))}
-        </div>
-      ) : null}
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 }
