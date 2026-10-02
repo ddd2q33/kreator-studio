@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { paintCodePanel, type CodeCardLayout } from "../lib/code-panel.ts";
+import {
+  codePanelTheme,
+  paintCodePanel,
+  type CodeCardLayout,
+} from "../lib/code-panel.ts";
 import { DEFAULT_CODE_THEME, type CodeReveal, type SceneCode } from "../lib/scene-schema.ts";
 
 /**
@@ -434,5 +438,144 @@ describe("focus dimming", () => {
 
   it("leaves progressive reveals untouched by dimming", () => {
     assert.equal(dimRows(snippet({ focus: [2], reveal: "lines" })), 0);
+  });
+});
+
+describe("paintCodePanel diff mode", () => {
+  // A base whose lines all survive, plus one removed and three added: the
+  // smallest diff that exercises every row kind.
+  const base = "def load():\n    return cache";
+  const after = "def load():\n    if cache:\n        return cache\n    return fetch()";
+  const diffSnippet = (over: Partial<SceneCode> = {}) =>
+    snippet({ mode: "diff", base, source: after, ...over });
+  const markers = (calls: RecordedCall[], mark: string) =>
+    calls.filter(
+      (c) => c.op === "fillText" && c.text === mark && c.align === "right",
+    ).length;
+
+  it("draws + and - markers instead of line numbers in the gutter", () => {
+    const calls = paint(diffSnippet());
+    assert.equal(markers(calls, "+"), 3);
+    assert.equal(markers(calls, "-"), 1);
+    assert.ok(
+      !calls.some(
+        (c) => c.op === "fillText" && c.align === "right" && /^\d+$/.test(c.text),
+      ),
+      "no numeric gutter in diff mode",
+    );
+  });
+
+  it("keeps numeric line numbers when the mode is not diff", () => {
+    const calls = paint(snippet());
+    assert.ok(
+      calls.some(
+        (c) => c.op === "fillText" && c.text === "1" && c.align === "right",
+      ),
+    );
+  });
+
+  it("falls back to a plain snippet when the base is blank", () => {
+    const calls = paint(diffSnippet({ base: "   " }));
+    assert.ok(
+      calls.some(
+        (c) => c.op === "fillText" && c.text === "1" && c.align === "right",
+      ),
+    );
+    const theme = codePanelTheme(DEFAULT_CODE_THEME);
+    assert.ok(
+      !calls.some((c) => c.op === "fillRect" && c.fillStyle === theme.diffAdd),
+    );
+  });
+
+  it("tints changed rows with the palette's diff colours", () => {
+    const calls = paint(diffSnippet());
+    const theme = codePanelTheme(DEFAULT_CODE_THEME);
+    assert.ok(
+      calls.some((c) => c.op === "fillRect" && c.fillStyle === theme.diffAdd),
+      "an added row's band is drawn",
+    );
+    assert.ok(
+      calls.some((c) => c.op === "fillRect" && c.fillStyle === theme.diffDel),
+      "a removed row's band is drawn",
+    );
+    // And the line text itself is monochrome in the diff colour — drawn per
+    // token, so assert on the words, not on a whole line.
+    assert.ok(
+      calls.some(
+        (c) => c.op === "fillText" && c.text === "cache" && c.fillStyle === theme.diffAdd,
+      ),
+    );
+    assert.ok(
+      calls.some(
+        (c) => c.op === "fillText" && c.text === "return" && c.fillStyle === theme.diffDel,
+      ),
+    );
+  });
+
+  it("labels the header with the diff badge", () => {
+    const calls = paint(diffSnippet());
+    assert.ok(calls.some((c) => c.text === "typescript \u00b7 diff"));
+  });
+
+  it("reveals diff rows line by line like a plain snippet", () => {
+    const early = paint(diffSnippet({ reveal: "lines" }), 1080, 1920, 0.05);
+    // One row on screen, and it is the first kept row: no marker yet.
+    assert.equal(markers(early, "+"), 0);
+    assert.equal(markers(early, "-"), 0);
+
+    const mid = paint(diffSnippet({ reveal: "lines" }), 1080, 1920, 0.5);
+    // Three rows in: kept, removed, first added — one of each marker.
+    assert.equal(markers(mid, "+"), 1);
+    assert.equal(markers(mid, "-"), 1);
+  });
+
+  it("lays callouts out against diff rows", () => {
+    const layout = captureLayout(diffSnippet({ callouts: { 2: "new guard" } }));
+    assert.equal(layout.callouts.length, 1);
+    assert.equal(layout.callouts[0]?.line, 2);
+    assert.equal(layout.callouts[0]?.anchored, true);
+  });
+
+  it("paints a stronger tint on the words that changed within a paired row", () => {
+    const card = captureLayout(diffSnippet());
+    const calls = paint(diffSnippet());
+    const theme = codePanelTheme(DEFAULT_CODE_THEME);
+    // The removal pairs with the first addition: its word tint is a narrow
+    // rect, unlike the row-wide band the other changed rows get.
+    const delWords = calls.filter(
+      (c) => c.op === "fillRect" && c.fillStyle === theme.diffDel && c.w < card.w / 2,
+    );
+    assert.ok(delWords.length > 0, "a word-level del tint is drawn");
+    const addWords = calls.filter(
+      (c) => c.op === "fillRect" && c.fillStyle === theme.diffAdd && c.w < card.w / 2,
+    );
+    assert.ok(addWords.length > 0, "a word-level add tint is drawn");
+    // And the row bands are still there behind them.
+    assert.ok(
+      calls.some((c) => c.op === "fillRect" && c.fillStyle === theme.diffAdd && c.w > card.w - 4),
+      "the full-width add band is not replaced by the word tints",
+    );
+  });
+
+  it("leaves rows without a counterpart as whole-row changes", () => {
+    // One addition after two kept lines: nothing to pair it with, so no
+    // narrower-than-a-row tint may appear at all.
+    const code = snippet({
+      mode: "diff",
+      base: "def load():\n    return cache",
+      source: "def load():\n    return cache\n    return fetch()",
+    });
+    const card = captureLayout(code);
+    const calls = paint(code);
+    const theme = codePanelTheme(DEFAULT_CODE_THEME);
+    assert.ok(
+      !calls.some(
+        (c) =>
+          c.op === "fillRect" &&
+          (c.fillStyle === theme.diffAdd || c.fillStyle === theme.diffDel) &&
+          c.w < card.w / 2,
+      ),
+      "an unpaired addition is not word-tinted",
+    );
   });
 });

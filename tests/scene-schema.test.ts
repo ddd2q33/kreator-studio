@@ -5,11 +5,14 @@ import {
   DEFAULT_BRAND,
   NOTES_MAX,
   SCENE_FORMAT_VERSION,
+  TERMINAL_LINE_MAX,
+  TERMINAL_LINES_MAX,
   normalizeFirstScene,
   normalizeScene,
   normalizeSceneAudio,
   normalizeSceneDocument,
   normalizeSceneInput,
+  normalizeSceneTerminal,
   normalizeScenes,
 } from "../lib/scene-schema.ts";
 
@@ -974,6 +977,147 @@ describe("code on a scene", () => {
     assert.notEqual(original, null);
     // The round trip an author does by hand: export the scene, edit nothing,
     // import it again.
+    const reloaded = normalizeScene(JSON.parse(JSON.stringify(original)), 0).scene;
+    assert.deepEqual(reloaded, original);
+  });
+});
+
+describe("scene code mode and base", () => {
+  it("defaults a plain snippet to single mode with an empty base", () => {
+    const { scene, warnings } = normalizeScene(
+      { title: "A", code: { source: "x = 1", language: "python" } },
+      0,
+    );
+    assert.ok(scene?.code);
+    assert.equal(scene.code.mode, "single");
+    assert.equal(scene.code.base, "");
+    assert.equal(warnings.length, 0);
+  });
+
+  it("keeps diff mode and the base text", () => {
+    const { scene, warnings } = normalizeScene(
+      {
+        title: "A",
+        code: { source: "x = 2", language: "python", mode: "diff", base: "x = 1" },
+      },
+      0,
+    );
+    assert.ok(scene?.code);
+    assert.equal(scene.code.mode, "diff");
+    assert.equal(scene.code.base, "x = 1");
+    assert.ok(!warnings.some((w) => w.includes("diff")));
+  });
+
+  it("warns and falls back to single when the mode is unknown", () => {
+    const { scene, warnings } = normalizeScene(
+      { title: "A", code: { source: "x = 1", mode: "side-by-side" } },
+      0,
+    );
+    assert.ok(scene?.code);
+    assert.equal(scene.code.mode, "single");
+    assert.ok(warnings.some((w) => w.includes('unknown code mode "side-by-side"')));
+  });
+
+  it("warns when diff mode has no base text", () => {
+    const { scene, warnings } = normalizeScene(
+      { title: "A", code: { source: "x = 1", mode: "diff", base: "   " } },
+      0,
+    );
+    assert.ok(scene?.code);
+    assert.equal(scene.code.mode, "diff");
+    assert.ok(warnings.some((w) => w.includes("diff scene has no base text")));
+  });
+
+  it("round-trips a diff scene through save and reload", () => {
+    const original = normalizeScene(
+      {
+        title: "Refactor",
+        code: { source: "x = 2", language: "python", mode: "diff", base: "x = 1" },
+      },
+      0,
+    ).scene;
+    assert.notEqual(original, null);
+    const reloaded = normalizeScene(JSON.parse(JSON.stringify(original)), 0).scene;
+    assert.deepEqual(reloaded, original);
+  });
+});
+
+describe("normalizeSceneTerminal", () => {
+  it("treats missing, empty or non-object input as no terminal", () => {
+    // Absence is silent; a present-but-wrong value is reported, so a
+    // hand-written file is told why its terminal did not show up.
+    for (const input of [undefined, null]) {
+      const { terminal, warnings } = normalizeSceneTerminal(input);
+      assert.equal(terminal, null);
+      assert.deepEqual(warnings, []);
+    }
+    for (const input of [42, "out", []]) {
+      const { terminal, warnings } = normalizeSceneTerminal(input);
+      assert.equal(terminal, null);
+      assert.ok(warnings.length > 0, JSON.stringify(input));
+    }
+    // An object without usable output lines is also null — blank lines are
+    // dropped silently, the same way the painter skips them.
+    const { terminal: empty } = normalizeSceneTerminal({ output: ["", "  "] });
+    assert.equal(empty, null);
+  });
+
+  it("keeps a title and output lines", () => {
+    const { terminal, warnings } = normalizeSceneTerminal({
+      title: "node demo.ts",
+      output: ["hello", "world"],
+    });
+    assert.deepEqual(terminal, { title: "node demo.ts", output: ["hello", "world"] });
+    assert.equal(warnings.length, 0);
+  });
+
+  it("drops blank and non-string output lines", () => {
+    const { terminal } = normalizeSceneTerminal({
+      output: ["ok", "", "   ", 42, null, "fine"],
+    });
+    assert.ok(terminal);
+    assert.deepEqual(terminal.output, ["ok", "fine"]);
+  });
+
+  it("falls back to a default title", () => {
+    const { terminal } = normalizeSceneTerminal({ output: ["hi"] });
+    assert.equal(terminal?.title, "terminal");
+  });
+
+  it("trims overlong output with a warning", () => {
+    const long = "x".repeat(200);
+    const many = Array.from({ length: 20 }, (_, i) => `line ${i}`);
+    const { terminal: one, warnings: oneWarnings } = normalizeSceneTerminal({
+      output: [long],
+    });
+    assert.equal(one?.output[0]?.length, TERMINAL_LINE_MAX);
+    assert.ok(oneWarnings.some((w) => w.includes("trimmed")));
+
+    const { terminal: manyKept, warnings: manyWarnings } =
+      normalizeSceneTerminal({ output: many });
+    assert.equal(manyKept?.output.length, TERMINAL_LINES_MAX);
+    assert.ok(manyWarnings.some((w) => w.includes("trimmed to")));
+  });
+
+  it("attaches the terminal to a normalized scene", () => {
+    const { scene } = normalizeScene(
+      { title: "Run", terminal: { title: "node", output: ["ok"] } },
+      0,
+    );
+    assert.ok(scene);
+    assert.deepEqual(scene.terminal, { title: "node", output: ["ok"] });
+  });
+
+  it("round-trips a scene with code and terminal through save and reload", () => {
+    const original = normalizeScene(
+      {
+        title: "Run",
+        code: { source: "print(1)", language: "python" },
+        terminal: { title: "node demo.ts", output: ["1"] },
+      },
+      0,
+    ).scene;
+    assert.notEqual(original, null);
     const reloaded = normalizeScene(JSON.parse(JSON.stringify(original)), 0).scene;
     assert.deepEqual(reloaded, original);
   });

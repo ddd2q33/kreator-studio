@@ -10,7 +10,9 @@
  * Sits on the brand gradient like the code card does, echoes the code card's
  * header style (three dots, one title) so the two read as one system, and
  * prints its lines one by one over the first 80% of the scene so the output
- * feels produced rather than pasted.
+ * feels produced rather than pasted. When the band under the code card cannot
+ * fit every line, it prints the rows that fit and nothing past its bottom
+ * limit.
  */
 
 import { monoFamily } from "./code-panel.ts";
@@ -126,9 +128,6 @@ export function paintTerminal(
   const lines = terminal.output.filter((l) => l.trim() !== "");
   if (lines.length === 0) return;
 
-  const shown = printedLineCount(lines.length, progress);
-  const visible = lines.slice(0, shown);
-
   const family = monoFamily();
   const gap = options.gap ?? Math.round(frameW * 0.02);
   const pad = Math.round(frameW * 0.016);
@@ -139,19 +138,34 @@ export function paintTerminal(
   const cardW = Math.round(frameW * WIDTH_RATIO);
   const innerW = cardW - pad * 2;
   const band = Math.max(frameW * 0.05, options.bottomLimit - options.topLimit - gap);
+  // A band too small for the header plus one printed line shows nothing
+  // readable — drop the card rather than let it spill over the code above
+  // or the captions below.
+  if (band < headerH + Math.round(frameW * 0.02)) return;
   const wanted = Math.round(frameW * 0.017);
   const floorSize = Math.max(9, Math.round(frameW * 0.009));
 
   ctx.font = `500 ${wanted}px ${family}`;
   const unit = (ctx.measureText("M").width || wanted * 0.6) / wanted;
-  const longest = Math.max(1, ...visible.map((l) => l.length), 4);
+  const longest = Math.max(1, ...lines.map((l) => l.length), 4);
 
   let size = wanted;
   while (size > floorSize && size * unit * longest > innerW) size -= 1;
-  while (size > floorSize && Math.round(size * 1.5) * (visible.length + 1) > band) {
+  const printed = printedLineCount(lines.length, progress);
+  while (size > floorSize && Math.round(size * 1.5) * (printed + 1) > band) {
     size -= 1;
   }
   const step = Math.round(size * 1.5);
+  // A band narrower than the whole printout wants: cap the lines to the rows
+  // that fit, so the card never spills past its bottom limit.
+  const fitRows = Math.max(
+    1,
+    Math.floor(
+      (band - headerH - Math.round(pad * 0.7) - Math.round(pad * 1.4)) / step,
+    ),
+  );
+  const shown = Math.min(printed, fitRows);
+  const visible = lines.slice(0, shown);
   const cardH = Math.min(
     band,
     headerH + pad + step * visible.length + Math.round(pad * 1.4),
@@ -215,7 +229,7 @@ export function paintTerminal(
     ctx.fillStyle = PALETTE.text;
     ctx.fillText(visible[i]!, cardX + pad + size * 1.4, y);
   }
-  if (shown < lines.length || progress < END) {
+  if (shown < lines.length && shown < fitRows && progress < END) {
     const y = textTop + step * visible.length + step / 2;
     ctx.fillStyle = PALETTE.caret;
     ctx.fillRect(cardX + pad + size * 1.4, y - size * 0.55, size * 0.55, size * 1.1);

@@ -5,7 +5,7 @@ import {
   type CodeLine,
   type CodeTokenKind,
 } from "./code-highlight.ts";
-import { diffLines } from "./code-diff.ts";
+import { diffLines, diffWords, mergeWordSpans, type WordSpan } from "./code-diff.ts";
 import { DEFAULT_CODE_THEME, type CodeReveal, type SceneCode } from "./scene-schema.ts";
 
 /**
@@ -280,6 +280,14 @@ const MIN_SIZE = 0.011; // of the frame width
  */
 const REVEAL_END = 0.9;
 
+/**
+ * The tint under the words that actually changed inside a paired changed row.
+ *
+ * Stronger than the row band: the band says "this line moved", the word tint
+ * says "here is the edit", the way GitHub marks a line that mostly stayed put.
+ */
+const WORD_TINT = 0.3;
+
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 /**
@@ -351,14 +359,47 @@ export function paintCodePanel(
   // A diff scene carries two snippets and shows the rewrite between them. A
   // base of only whitespace is a mis-edit rather than a diff against nothing,
   // so it falls back to painting the plain snippet.
-  const isDiff = code.mode === "diff" && code.base.trim() !== "";
-  const diffRows = isDiff ? diffLines(code.base, code.source) : [];
-  const lines = isDiff
-    ? diffRows.map((row) => tokenizeCode(row.text, code.language))
+  const isDiff = code.mode === "diff" && (code.base ?? "").trim() !== "";
+  const diffRows = isDiff ? diffLines(code.base ?? "", code.source) : [];
+  // `tokenizeCode` returns every line of its input; a diff row is a single
+  // line, so take the one line back out of the tokenizer's list.
+  const lines: CodeLine[] = isDiff
+    ? diffRows.map((row) => tokenizeCode(row.text, code.language)[0] ?? [])
     : tokenizeCode(code.source, code.language);
   // A snippet of nothing but blank lines is nothing, and an empty card with a
   // header and a gutter is worse than no card: it reads as a broken export.
   if (lines.every((line) => lineText(line).trim() === "")) return;
+
+  // Word-level spans for changed rows that have a counterpart: within a
+  // rewritten line most words stayed put, and only the ones that moved earn
+  // the stronger tint. Consecutive deletions and additions are paired up
+  // within each hunk; rows without a pair - a pure addition or deletion -
+  // changed whole, so they keep the row-wide band and nothing narrower.
+  const wordSpansByRow = new Map<number, WordSpan[]>();
+  if (isDiff) {
+    let row = 0;
+    while (row < diffRows.length) {
+      if (diffRows[row]!.kind === "same") {
+        row += 1;
+        continue;
+      }
+      const hunkStart = row;
+      while (row < diffRows.length && diffRows[row]!.kind !== "same") row += 1;
+      const dels: number[] = [];
+      const adds: number[] = [];
+      for (let k = hunkStart; k < row; k++) {
+        (diffRows[k]!.kind === "del" ? dels : adds).push(k);
+      }
+      const paired = Math.min(dels.length, adds.length);
+      for (let k = 0; k < paired; k++) {
+        const words = diffWords(diffRows[dels[k]!]!.text, diffRows[adds[k]!]!.text);
+        const removed = mergeWordSpans(words.removed);
+        const added = mergeWordSpans(words.added);
+        if (removed.length > 0) wordSpansByRow.set(dels[k]!, removed);
+        if (added.length > 0) wordSpansByRow.set(adds[k]!, added);
+      }
+    }
+  }
   const state = revealState(lines, code.reveal, progress);
   const visible = lines.slice(0, state.whole);
   const partial = state.partial > 0 ? lines[state.whole] : undefined;
@@ -559,6 +600,24 @@ export function paintCodePanel(
       ctx.globalAlpha = 0.13;
       ctx.fillStyle = rowKind === "add" ? theme.diffAdd : theme.diffDel;
       ctx.fillRect(cardX + 1, top + step * row, cardW - 2, step);
+      ctx.restore();
+    }
+    // The stronger tint under exactly the words that changed, for rows whose
+    // counterpart was paired above. Char offsets map straight to x because the
+    // card is monospace: no measuring, the same arithmetic in every renderer.
+    const wordSpans = rowKind === null ? undefined : wordSpansByRow.get(index);
+    if (wordSpans) {
+      ctx.save();
+      ctx.globalAlpha = WORD_TINT;
+      ctx.fillStyle = rowKind === "add" ? theme.diffAdd : theme.diffDel;
+      for (const span of wordSpans) {
+        ctx.fillRect(
+          textLeft + span.start * advance,
+          top + step * row,
+          (span.end - span.start) * advance,
+          step,
+        );
+      }
       ctx.restore();
     }
     ctx.save();

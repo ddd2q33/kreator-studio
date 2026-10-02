@@ -124,6 +124,42 @@ describe("scene JSON templates", () => {
     assert.equal(scenes.every((s) => s.group === "How a memo cache works"), true);
   });
 
+  it("the refactor template teaches a diff and proves it in a terminal", () => {
+    const { document, warnings } = applyTemplate("refactor");
+    assert.deepEqual(warnings, []);
+    const scenes = document!.scenes;
+    assert.equal(scenes.length, 3);
+    const withCode = scenes.filter((s) => s.code !== null);
+    assert.equal(withCode.length, 2);
+
+    // The diff scene: base filled, different from the shown snippet, and the
+    // added guard line spotlighted and named.
+    const diff = withCode[0]!.code!;
+    assert.equal(diff.mode, "diff");
+    assert.ok((diff.base ?? "").trim().length > 0, "diff base is filled");
+    assert.notEqual(diff.source, diff.base);
+    assert.ok((diff.focus ?? []).includes(2));
+    assert.equal(diff.callouts?.[2], "the guard");
+
+    // The closing scene pairs the finished function with its output.
+    const result = withCode[1]!;
+    assert.equal(result.code!.mode, "single");
+    assert.ok(result.terminal, "the result scene carries a terminal");
+    assert.ok(result.terminal.output.length > 0);
+  });
+
+  it("the demo template pairs one snippet with its output", () => {
+    const { document, warnings } = applyTemplate("code-demo");
+    assert.deepEqual(warnings, []);
+    const scene = document!.scenes[0];
+    assert.equal(scene?.code?.mode, "single");
+    assert.ok(scene?.terminal, "demo scene has a terminal");
+    assert.ok(scene.terminal.output.length > 0);
+    assert.ok(scene.terminal.title.length > 0);
+    // The demo shows the painter's full stack: code, callout and terminal.
+    assert.ok(Object.keys(scene.code!.callouts ?? {}).length > 0);
+  });
+
   it("the single-scene template is one scene and not a document", () => {
     // Guards the routing the editor depends on: an object without a `scenes`
     // array must not be read as a document, or the `scenes` key of a real

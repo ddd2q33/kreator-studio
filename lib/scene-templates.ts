@@ -255,10 +255,112 @@ const lesson = {
 };
 
 /**
+ * A refactor told the way a code review reads: one frame shows the diff
+ * between the old snippet and the new one, then the finished function runs
+ * with its terminal output printing under it. `mode: "diff"` plus a `base` is
+ * all the painter needs to mark the changed rows, and the callout sits on the
+ * added guard line — the line the narration is about.
+ */
+const refactor = {
+  scene: "Refactor: the cache guard",
+  kicker: "REFACTOR",
+  subscenes: [
+    {
+      narration: "This loader works — it just recomputes the same key every single time.",
+      duration: 3,
+      transition: "fade",
+    },
+    {
+      narration: "One guard clause is the whole optimisation: check the cache before computing.",
+      duration: 5,
+      transition: "fade",
+      code: {
+        language: "typescript",
+        source: [
+          "function load(key: string) {",
+          "  if (cache.has(key)) return cache.get(key);",
+          "  const value = compute(key);",
+          "  cache.set(key, value);",
+          "  return value;",
+          "}",
+        ].join("\n"),
+        base: [
+          "function load(key: string) {",
+          "  const value = compute(key);",
+          "  return value;",
+          "}",
+        ].join("\n"),
+        mode: "diff",
+        theme: "midnight",
+        reveal: "lines",
+        scale: 1,
+        callouts: { 2: "the guard" },
+        focus: [2],
+      },
+    },
+    {
+      narration: "And the terminal proves it: the second call never recomputes.",
+      duration: 5,
+      transition: "fade",
+      code: {
+        language: "typescript",
+        source: [
+          "function load(key: string) {",
+          "  if (cache.has(key)) return cache.get(key);",
+          "  const value = compute(key);",
+          "  cache.set(key, value);",
+          "  return value;",
+          "}",
+        ].join("\n"),
+        theme: "midnight",
+        reveal: "all",
+        scale: 1,
+      },
+      terminal: {
+        title: "node --test cache.test.js",
+        output: ["load(twice) → 1 compute", "cache hit: true", "2 passing"],
+      },
+    },
+  ],
+};
+
+/**
+ * The smallest code-with-output scene: one snippet, its callout, and the
+ * terminal printing under it. A single object, not a section, so it replaces
+ * one scene and demonstrates the pairing without any group machinery.
+ */
+const codeDemo = {
+  title: "Fibonacci, but fast",
+  kicker: "DEMO",
+  narration: "Memoisation turns an exponential walk into a linear one.",
+  duration: 6,
+  transition: "zoom",
+  code: {
+    language: "python",
+    source: [
+      "from functools import lru_cache",
+      "@lru_cache(maxsize=None)",
+      "def fib(n):",
+      "    return n if n < 2 else fib(n - 1) + fib(n - 2)",
+    ].join("\n"),
+    theme: "paper",
+    reveal: "all",
+    scale: 1,
+    callouts: { 2: "caches results" },
+    focus: [2],
+  },
+  terminal: {
+    title: "python fib.py",
+    output: ["time python fib.py", "fib(90) = 2880067194370816120", "real 0m0.02s"],
+  },
+};
+
+/**
  * The full set, in the order the picker shows them: simplest first, so the
- * first three options cover every shape and the rest are reference material —
- * a full project file, one scene with every field, one with media, and one
- * with every transition.
+ * first three options cover every shape. Then the code templates — a run of
+ * snippets, a refactor told as a diff, and one demo with its output — and
+ * finally the reference material: a full project file, one scene with every
+ * field, one with media, and one with every transition.
  */
 export const SCENE_JSON_TEMPLATES: readonly SceneJsonTemplate[] = [
   {
@@ -278,6 +380,18 @@ export const SCENE_JSON_TEMPLATES: readonly SceneJsonTemplate[] = [
     label: "Programming lesson",
     hint: "A run of code frames, one snippet per scene.",
     json: JSON.stringify(lesson, null, 2),
+  },
+  {
+    id: "refactor",
+    label: "Refactor walk-through",
+    hint: "A before/after diff, then the result with its terminal output.",
+    json: JSON.stringify(refactor, null, 2),
+  },
+  {
+    id: "code-demo",
+    label: "Code demo with output",
+    hint: "One snippet and its terminal output printing as the scene plays.",
+    json: JSON.stringify(codeDemo, null, 2),
   },
   {
     id: "episode",

@@ -181,6 +181,8 @@ describe("normalizeSceneCode", () => {
       scale: 1,
       callouts: {},
       focus: [],
+      mode: "single",
+      base: "",
     });
     assert.deepEqual(warnings, []);
   });
@@ -201,6 +203,8 @@ describe("normalizeSceneCode", () => {
       scale: 1.4,
       callouts: {},
       focus: [],
+      mode: "single",
+      base: "",
     });
   });
 

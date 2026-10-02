@@ -22,6 +22,7 @@ import {
   Clapperboard,
   Clock3,
   Copy,
+  CornerUpLeft,
   Download,
   GripVertical,
   Image as ImageIcon,
@@ -77,6 +78,7 @@ import {
 } from "@/lib/code-panel";
 import { paintTerminal } from "@/lib/code-terminal";
 import type {
+  CodeMode,
   CodeReveal,
   ImageFit,
   SceneCode,
@@ -1798,7 +1800,7 @@ export function VideoStudio({
       const current =
         scenesRef.current.find((s) => s.id === id)?.terminal ??
         { title: "", output: [] };
-      const next = normalizeSceneTerminal({ ...current, ...patch });
+      const { terminal: next } = normalizeSceneTerminal({ ...current, ...patch });
       applyToScene(id, { terminal: next }, { kind: "edit", key: `${id}:terminal` });
     },
     [applyToScene],
@@ -1818,6 +1820,21 @@ export function VideoStudio({
     const stepped = Math.round(raw * 2) / 2;
     return Math.min(DURATION_MAX, Math.max(DURATION_MIN, stepped));
   }, [selectedScene?.narration]);
+
+  /**
+   * The previous scene's final code, usable as the "before" half of a diff.
+   *
+   * Chained scenes normally edit the same file, so scene N starts where scene
+   * N-1 ended: its `source` (for diff scenes, the state AFTER the change) is
+   * exactly the base this scene's diff should show. Null when there is no
+   * previous scene or it has no code to reuse — the fill button disables then.
+   */
+  const previousSceneCodeSource = useMemo(() => {
+    const i = selectedSceneIndex;
+    if (i <= 0) return null;
+    const source = scenes[i - 1]?.code?.source ?? "";
+    return source.trim() === "" ? null : source;
+  }, [scenes, selectedSceneIndex]);
 
   /**
    * Batch edit mode: a checkbox on every scene card and one bar that applies
@@ -4729,21 +4746,48 @@ export function VideoStudio({
                       </label>
                     </div>
                     {selectedScene.code.mode === "diff" && (
-                      <textarea
-                        value={selectedScene.code.base ?? ""}
-                        onChange={(e) =>
-                          editSceneCode(
-                            selectedScene.id,
-                            { base: e.target.value },
-                            `${selectedScene.id}:code.base`,
-                          )
-                        }
-                        placeholder="Paste the code as it was BEFORE this scene's change"
-                        rows={5}
-                        spellCheck={false}
-                        className="w-full resize-y rounded border bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground outline-none focus:border-ring"
-                        aria-label="Code before the change (diff base)"
-                      />
+                      <div className="space-y-1">
+                        <button
+                          type="button"
+                          aria-label="Use previous scene code as base"
+                          onClick={() => {
+                            if (previousSceneCodeSource === null) return;
+                            editSceneCode(
+                              selectedScene.id,
+                              { base: previousSceneCodeSource },
+                              `${selectedScene.id}:code.base`,
+                            );
+                            setStatus(
+                              `Diff base filled from scene ${selectedSceneIndex} — the code as it stood before this scene.`,
+                            );
+                          }}
+                          disabled={previousSceneCodeSource === null}
+                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+                          title={
+                            previousSceneCodeSource === null
+                              ? "The previous scene has no code to reuse"
+                              : `Copy scene ${selectedSceneIndex}'s code as the "before" half of this diff`
+                          }
+                        >
+                          <CornerUpLeft className="size-3" />
+                          Use previous scene code as base
+                        </button>
+                        <textarea
+                          value={selectedScene.code.base ?? ""}
+                          onChange={(e) =>
+                            editSceneCode(
+                              selectedScene.id,
+                              { base: e.target.value },
+                              `${selectedScene.id}:code.base`,
+                            )
+                          }
+                          placeholder="Paste the code as it was BEFORE this scene's change"
+                          rows={5}
+                          spellCheck={false}
+                          className="w-full resize-y rounded border bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground outline-none focus:border-ring"
+                          aria-label="Code before the change (diff base)"
+                        />
+                      </div>
                     )}
                     <CalloutRows
                       callouts={selectedScene.code.callouts ?? {}}
@@ -4811,16 +4855,20 @@ export function VideoStudio({
                   <button
                     type="button"
                     onClick={() =>
-                      editSceneCode(selectedScene.id, {
-                        source: "",
-                        language: "typescript",
-                        theme: DEFAULT_CODE_THEME,
-                        reveal: "all",
-                        scale: 1,
-                        callouts: {},
-                        focus: [],
-                        mode: "single",
-                        base: "",
+                      // One commit, not two: showing code for the first time
+                      // also resets any terminal remnant in the same step.
+                      applyToScene(selectedScene.id, {
+                        code: {
+                          source: "",
+                          language: "typescript",
+                          theme: DEFAULT_CODE_THEME,
+                          reveal: "all",
+                          scale: 1,
+                          callouts: {},
+                          focus: [],
+                          mode: "single",
+                          base: "",
+                        },
                         terminal: null,
                       })
                     }
@@ -5342,6 +5390,21 @@ export function VideoStudio({
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleBatchMode}
+              aria-pressed={batchMode}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+                batchMode
+                  ? "bg-amber-500 text-background"
+                  : "border border-foreground/15 text-muted-foreground hover:text-foreground",
+              )}
+              aria-label="Batch edit scenes"
+              title="Restyle several scenes at once — palettes, transitions, durations"
+            >
+              Batch edit
+            </button>
             <span className="text-[11px] text-muted-foreground">
               Click a clip to edit · ↑/↓ reorder
             </span>
