@@ -403,7 +403,7 @@ const DEFAULT_SCENE = (): VideoScene => ({
   imageKey: null,
   imageFit: "contain",
   duration: 4,
-  transition: "fade",
+  transition: "cut",
   volume: 1,
   muted: false,
   audio: null,
