@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
-import { LibraryBig } from "lucide-react";
+import { LibraryBig, Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
 
 import { useLibraryOpen } from "@/components/editor/library-toggle";
 import { APP_VERSION } from "@/lib/app-version";
@@ -17,6 +19,9 @@ import { APP_VERSION } from "@/lib/app-version";
  */
 export function StudioHeader({ right }: { right?: React.ReactNode }) {
   const [libraryOpen, setLibraryOpen] = useLibraryOpen();
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-background px-4">
@@ -51,6 +56,19 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          className="flex size-7 shrink-0 items-center justify-center rounded-lg border text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          title="Toggle light/dark mode"
+          aria-label="Toggle light/dark mode"
+        >
+          {mounted && resolvedTheme === "dark" ? (
+            <Sun className="size-4" />
+          ) : (
+            <Moon className="size-4" />
+          )}
+        </button>
         {right}
       </div>
     </header>
