@@ -523,7 +523,7 @@ describe("paintCodePanel diff mode", () => {
     assert.equal(markers(early, "+"), 0);
     assert.equal(markers(early, "-"), 0);
 
-    const mid = paint(diffSnippet({ reveal: "lines" }), 1080, 1920, 0.5);
+    const mid = paint(diffSnippet({ reveal: "lines" }), 1080, 1920, 0.25);
     // Three rows in: kept, removed, first added — one of each marker.
     assert.equal(markers(mid, "+"), 1);
     assert.equal(markers(mid, "-"), 1);

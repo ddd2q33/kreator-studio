@@ -279,7 +279,7 @@ const MIN_SIZE = 0.011; // of the frame width
  * The tail of a scene is the beat where the reader looks at the finished code,
  * so the animation has to be over before the cut rather than landing on it.
  */
-const REVEAL_END = 0.9;
+const REVEAL_END = 0.5;
 
 /**
  * The tint under the words that actually changed inside a paired changed row.
