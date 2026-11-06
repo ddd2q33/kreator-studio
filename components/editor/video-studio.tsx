@@ -4264,6 +4264,12 @@ export function VideoStudio({
               aria-label="Output filename"
               title="Output filename"
             />
+            <ExportHub
+              targets={hubTargets}
+              defaultId="mp4"
+              className="ml-1"
+              onCancel={cancelExport}
+            />
           </>
         }
       />
