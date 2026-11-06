@@ -28,7 +28,7 @@ const single = {
   subtitle: "A short line under the title",
   narration: "She read the message twice before she understood it.",
   duration: 4,
-  transition: "fade",
+  transition: "cut",
 };
 
 const section = {
@@ -38,17 +38,17 @@ const section = {
     {
       narration: "She checked her phone again.",
       duration: 2,
-      transition: "fade",
+      transition: "cut",
     },
     {
       narration: "Again. Still nothing.",
       duration: 2,
-      transition: "fade",
+      transition: "cut",
     },
     {
       narration: "But silence felt louder than words.",
       duration: 3,
-      transition: "fade",
+      transition: "cut",
     },
   ],
 };
@@ -60,14 +60,14 @@ const episode = {
     {
       scene: "The Message",
       subscenes: [
-        { narration: "Then finally...", duration: 2, transition: "fade" },
-        { narration: "A message appeared.", duration: 2, transition: "fade" },
+        { narration: "Then finally...", duration: 2, transition: "cut" },
+        { narration: "A message appeared.", duration: 2, transition: "cut" },
         {
           narration: "Sorry. Long day. Going to sleep. Goodnight.",
           duration: 4,
-          transition: "fade",
+          transition: "cut",
         },
-        { narration: "For a moment, she felt safe.", duration: 3, transition: "fade" },
+        { narration: "For a moment, she felt safe.", duration: 3, transition: "cut" },
       ],
     },
     {
@@ -76,12 +76,12 @@ const episode = {
         {
           narration: "Healing doesn't begin by forcing yourself to stop feeling.",
           duration: 5,
-          transition: "fade",
+          transition: "cut",
         },
         {
           narration: "It begins by understanding why you feel this way.",
           duration: 5,
-          transition: "fade",
+          transition: "cut",
         },
       ],
     },
@@ -102,7 +102,7 @@ const media = {
     type: "audio/wav",
   },
   duration: 4,
-  transition: "fade",
+  transition: "cut",
 };
 
 /**
@@ -190,12 +190,12 @@ const lesson = {
     {
       narration: "A memo cache remembers what it already computed.",
       duration: 3,
-      transition: "fade",
+      transition: "cut",
     },
     {
       narration: "Here is the whole idea: look it up, compute it only if it is missing.",
       duration: 5,
-      transition: "fade",
+      transition: "cut",
       code: {
         language: "typescript",
         source: [
@@ -217,7 +217,7 @@ const lesson = {
     {
       narration: "The cache lookup is the entire optimisation.",
       duration: 4,
-      transition: "fade",
+      transition: "cut",
       code: {
         language: "typescript",
         source: "if (cache.has(n)) return cache.get(n)!;",
@@ -231,7 +231,7 @@ const lesson = {
     {
       narration: "Type it out character by character for the trick, and show it whole for the result.",
       duration: 4,
-      transition: "fade",
+      transition: "cut",
       code: {
         language: "python",
         source: ["@lru_cache(maxsize=None)", "def fib(n):", "    return n if n < 2 else fib(n - 1) + fib(n - 2)"].join(
@@ -249,7 +249,7 @@ const lesson = {
     {
       narration: "Now try it on your own code.",
       duration: 3,
-      transition: "fade",
+      transition: "cut",
     },
   ],
 };
@@ -268,12 +268,12 @@ const refactor = {
     {
       narration: "This loader works — it just recomputes the same key every single time.",
       duration: 3,
-      transition: "fade",
+      transition: "cut",
     },
     {
       narration: "One guard clause is the whole optimisation: check the cache before computing.",
       duration: 5,
-      transition: "fade",
+      transition: "cut",
       code: {
         language: "typescript",
         source: [
@@ -301,7 +301,7 @@ const refactor = {
     {
       narration: "And the terminal proves it: the second call never recomputes.",
       duration: 5,
-      transition: "fade",
+      transition: "cut",
       code: {
         language: "typescript",
         source: [
@@ -363,9 +363,9 @@ const completeCode = {
   title: "Memoise a function",
   kicker: "COMPLETE EXAMPLE",
   narration:
-    "Memoisation turns an exponential walk into a linear one.",
+    "Memoisation turns an exponential walk into a linear one. Watch each line appear: the callouts name what it does.",
   duration: 5,
-  transition: "fade",
+  transition: "cut",
   code: {
     language: "typescript",
     source: [
@@ -421,7 +421,7 @@ const socialShort = {
       title: "The fix",
       narration: "Watch the guard clause appear character by character.",
       duration: 3,
-      transition: "fade",
+      transition: "cut",
       code: {
         language: "typescript",
         source: "if (!user) return null;",
@@ -463,7 +463,7 @@ const socialTutorial = {
         {
           narration: "Start with a cache.",
           duration: 2,
-          transition: "fade",
+          transition: "cut",
           code: {
             language: "typescript",
             source: "const cache = new Map();",
@@ -475,7 +475,7 @@ const socialTutorial = {
         {
           narration: "Then guard the computation.",
           duration: 3,
-          transition: "fade",
+          transition: "cut",
           code: {
             language: "typescript",
             source: [
@@ -494,7 +494,7 @@ const socialTutorial = {
         {
           narration: "The terminal proves the second call is free.",
           duration: 3,
-          transition: "fade",
+          transition: "cut",
           code: {
             language: "typescript",
             source: [
@@ -613,7 +613,7 @@ export const SCENE_JSON_TEMPLATES: readonly SceneJsonTemplate[] = [
           {
             narration: "fade - crossfade centred on the cut.",
             duration: 2,
-            transition: "fade",
+            transition: "cut",
           },
           {
             narration: "cut - hard cut, no blend.",
@@ -645,3 +645,5 @@ export const DEFAULT_SCENE_JSON_TEMPLATE_ID = "section";
 export function sceneJsonTemplate(id: string): SceneJsonTemplate | null {
   return SCENE_JSON_TEMPLATES.find((t) => t.id === id) ?? null;
 }
+
+
