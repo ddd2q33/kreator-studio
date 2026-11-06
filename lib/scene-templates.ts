@@ -183,9 +183,9 @@ const allFields = {
  */
 const completeCode = {
   title: "Memoise a function",
-  kicker: "COMPLETE EXAMPLE",
+  kicker: "STEP BY STEP",
   narration:
-    "Memoisation turns an exponential walk into a linear one. Watch each line appear: the callouts name what it does.",
+    "Memoisation turns an exponential walk into a linear one. We build it one line at a time, and each step is named.",
   duration: 7,
   transition: "cut",
   code: {
