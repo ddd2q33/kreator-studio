@@ -1937,6 +1937,12 @@ export function VideoStudio({
    *   no scene to replace.
    */
   const applySceneJson = useCallback(() => {
+    if (scenes.length > 0) {
+      const ok = window.confirm(
+        "Applying this template will replace all existing scenes. Continue?",
+      );
+      if (!ok) return;
+    }
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(jsonDraft) as Record<string, unknown>;
@@ -1977,7 +1983,7 @@ export function VideoStudio({
     if (isDocument) {
       const sections = groupLabels(built);
       const run = built.map((s) => ({ ...s, id: uid("scene-") }));
-      setScenes((prev) => [...prev, ...run]);
+      setScenes(run);
       requestAnimationFrame(() => setSelectedId(run[0]!.id));
       setJsonError(null);
       setJsonOpen(false);
@@ -1990,7 +1996,7 @@ export function VideoStudio({
     if (!selectedScene) {
       const run = isGrouped ? built : built.slice(0, 1);
       const label = run[0]!.group;
-      setScenes((prev) => [...prev, ...run]);
+      setScenes(run);
       const firstId = run[0]!.id;
       requestAnimationFrame(() => setSelectedId(firstId));
       setJsonError(null);
