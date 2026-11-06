@@ -363,9 +363,9 @@ const completeCode = {
   title: "Memoise a function",
   kicker: "COMPLETE EXAMPLE",
   narration:
-    "Memoisation turns an exponential walk into a linear one, and here is the whole thing in one scene.",
-  duration: 8,
-  transition: "zoom",
+    "Memoisation turns an exponential walk into a linear one.",
+  duration: 5,
+  transition: "fade",
   code: {
     language: "typescript",
     source: [
@@ -414,13 +414,13 @@ const socialShort = {
       title: "One line that fixes your bug",
       subtitle: "Save this for later",
       narration: "Here is the one line that fixes the bug everyone hits.",
-      duration: 2,
+      duration: 1.5,
       transition: "cut",
     },
     {
       title: "The fix",
       narration: "Watch the guard clause appear character by character.",
-      duration: 4,
+      duration: 3,
       transition: "fade",
       code: {
         language: "typescript",
@@ -434,8 +434,8 @@ const socialShort = {
       title: "Follow for more",
       subtitle: "@yourhandle",
       narration: "Follow for more quick coding tips.",
-      duration: 2,
-      transition: "zoom",
+      duration: 1.5,
+      transition: "cut",
     },
   ],
 };
@@ -454,7 +454,7 @@ const socialTutorial = {
       title: "Memoise in 30 seconds",
       subtitle: "TypeScript",
       narration: "Memoise a function in three steps.",
-      duration: 2,
+      duration: 1.5,
       transition: "cut",
     },
     {
@@ -462,7 +462,7 @@ const socialTutorial = {
       subscenes: [
         {
           narration: "Start with a cache.",
-          duration: 3,
+          duration: 2,
           transition: "fade",
           code: {
             language: "typescript",
@@ -474,7 +474,7 @@ const socialTutorial = {
         },
         {
           narration: "Then guard the computation.",
-          duration: 4,
+          duration: 3,
           transition: "fade",
           code: {
             language: "typescript",
@@ -493,7 +493,7 @@ const socialTutorial = {
         },
         {
           narration: "The terminal proves the second call is free.",
-          duration: 4,
+          duration: 3,
           transition: "fade",
           code: {
             language: "typescript",
