@@ -820,7 +820,18 @@ export function paintSubtitle(
 ) {
   if (!cue || cue.lines.length === 0) return;
 
-  const size = Math.round(Math.min(w * 0.042, h * 0.034) * style.sizeRatio);
+  let size = Math.round(Math.min(w * 0.042, h * 0.034) * style.sizeRatio);
+  // Keep captions inside the frame on narrow (mobile/portrait) canvases: shrink
+  // the font until the widest line fits within 90% of the canvas width.
+  const maxCaptionWidth = w * 0.9;
+  ctx.font = `${style.fontWeight} ${size}px ${style.fontFamily}`;
+  const initialWidths = cue.lines.map((line) =>
+    ctx.measureText(line).width,
+  );
+  const widest = Math.max(...initialWidths, 0);
+  if (widest > maxCaptionWidth && widest > 0) {
+    size = Math.max(10, Math.floor(size * (maxCaptionWidth / widest)));
+  }
   const lineH = size * 1.32;
   ctx.font = `${style.fontWeight} ${size}px ${style.fontFamily}`;
   ctx.textBaseline = "middle";
@@ -878,7 +889,7 @@ export function paintSubtitle(
   const widths = perLine.map((tokens) => measureSubtitleTokens(ctx, tokens, trackingPx));
   const maxW = Math.max(...widths);
   const padX = size * style.platePadding;
-  const boxW = maxW + padX * 2;
+  const boxW = Math.min(maxW + padX * 2, w * 0.94);
   const boxH = cue.lines.length * lineH + size * style.platePadding;
   const boxX = (w - boxW) / 2;
   const boxY = h - boxH - h * style.bottomRatio;
