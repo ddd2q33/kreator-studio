@@ -364,7 +364,7 @@ const completeCode = {
   kicker: "COMPLETE EXAMPLE",
   narration:
     "Memoisation turns an exponential walk into a linear one. Watch each line appear: the callouts name what it does.",
-  duration: 5,
+  duration: 7,
   transition: "cut",
   code: {
     language: "typescript",
@@ -414,13 +414,13 @@ const socialShort = {
       title: "One line that fixes your bug",
       subtitle: "Save this for later",
       narration: "Here is the one line that fixes the bug everyone hits.",
-      duration: 1.5,
+      duration: 2.5,
       transition: "cut",
     },
     {
       title: "The fix",
       narration: "Watch the guard clause appear character by character.",
-      duration: 3,
+      duration: 4.5,
       transition: "cut",
       code: {
         language: "typescript",
@@ -434,7 +434,7 @@ const socialShort = {
       title: "Follow for more",
       subtitle: "@yourhandle",
       narration: "Follow for more quick coding tips.",
-      duration: 1.5,
+      duration: 2,
       transition: "cut",
     },
   ],
@@ -454,7 +454,7 @@ const socialTutorial = {
       title: "Memoise in 30 seconds",
       subtitle: "TypeScript",
       narration: "Memoise a function in three steps.",
-      duration: 1.5,
+      duration: 2,
       transition: "cut",
     },
     {
@@ -462,7 +462,7 @@ const socialTutorial = {
       subscenes: [
         {
           narration: "Start with a cache.",
-          duration: 2,
+          duration: 3,
           transition: "cut",
           code: {
             language: "typescript",
@@ -474,7 +474,7 @@ const socialTutorial = {
         },
         {
           narration: "Then guard the computation.",
-          duration: 3,
+          duration: 4,
           transition: "cut",
           code: {
             language: "typescript",
@@ -493,7 +493,7 @@ const socialTutorial = {
         },
         {
           narration: "The terminal proves the second call is free.",
-          duration: 3,
+          duration: 4,
           transition: "cut",
           code: {
             language: "typescript",
