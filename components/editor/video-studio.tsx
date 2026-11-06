@@ -5716,10 +5716,9 @@ export function VideoStudio({
                     if (playing) playFrom(i);
                     else seekTo(start);
                   }}
-                  className="flex flex-col items-stretch"
-                  aria-label={`Select scene ${i + 1}`}
-                >
-                  <div className="h-16 shrink-0">
+                  className={`flex flex-col items-stretch rounded-md transition-shadow ${isActive ? "ring-2 ring-emerald-500" : "ring-1 ring-transparent hover:ring-border"}`}
+                  aria-label={`Select scene ${i + 1}`}>
+                  <div className="h-24 shrink-0">
                     <div className="relative size-full">
                       <TimelineThumb
                         scene={scene}

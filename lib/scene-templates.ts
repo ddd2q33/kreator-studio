@@ -356,6 +356,126 @@ const codeDemo = {
 };
 
 /**
+ * A vertical short for social platforms: a hook, one typed snippet, and a call
+ * to action. Portrait canvas, caption style built for watching muted.
+ */
+const socialShort = {
+  version: 1,
+  portrait: true,
+  subtitleStyleId: "reels",
+  brand: "#0f172a",
+  scenes: [
+    {
+      kicker: "TIP",
+      title: "One line that fixes your bug",
+      subtitle: "Save this for later",
+      narration: "Here is the one line that fixes the bug everyone hits.",
+      duration: 2,
+      transition: "cut",
+    },
+    {
+      title: "The fix",
+      narration: "Watch the guard clause appear character by character.",
+      duration: 4,
+      transition: "fade",
+      code: {
+        language: "typescript",
+        source: "if (!user) return null;",
+        theme: "midnight",
+        reveal: "typed",
+        scale: 1.4,
+      },
+    },
+    {
+      title: "Follow for more",
+      subtitle: "@yourhandle",
+      narration: "Follow for more quick coding tips.",
+      duration: 2,
+      transition: "zoom",
+    },
+  ],
+};
+
+/**
+ * A coding tutorial reel: title card, three typed steps, terminal proof.
+ */
+const socialTutorial = {
+  version: 1,
+  portrait: true,
+  subtitleStyleId: "reels",
+  brand: "#7c3aed",
+  scenes: [
+    {
+      kicker: "TUTORIAL",
+      title: "Memoise in 30 seconds",
+      subtitle: "TypeScript",
+      narration: "Memoise a function in three steps.",
+      duration: 2,
+      transition: "cut",
+    },
+    {
+      scene: "Step 1",
+      subscenes: [
+        {
+          narration: "Start with a cache.",
+          duration: 3,
+          transition: "fade",
+          code: {
+            language: "typescript",
+            source: "const cache = new Map();",
+            theme: "midnight",
+            reveal: "typed",
+            scale: 1.3,
+          },
+        },
+        {
+          narration: "Then guard the computation.",
+          duration: 4,
+          transition: "fade",
+          code: {
+            language: "typescript",
+            source: [
+              "function load(key: string) {",
+              "  if (cache.has(key)) return cache.get(key);",
+              "  const value = compute(key);",
+              "  cache.set(key, value);",
+              "  return value;",
+              "}",
+            ].join("\n"),
+            theme: "midnight",
+            reveal: "lines",
+            scale: 1.1,
+          },
+        },
+        {
+          narration: "The terminal proves the second call is free.",
+          duration: 4,
+          transition: "fade",
+          code: {
+            language: "typescript",
+            source: [
+              "function load(key: string) {",
+              "  if (cache.has(key)) return cache.get(key);",
+              "  const value = compute(key);",
+              "  cache.set(key, value);",
+              "  return value;",
+              "}",
+            ].join("\n"),
+            theme: "midnight",
+            reveal: "all",
+            scale: 1.1,
+          },
+          terminal: {
+            title: "node demo.js",
+            output: ["load(a) -> compute", "load(a) -> cache hit", "2 passing"],
+          },
+        },
+      ],
+    },
+  ],
+};
+
+/**
  * The full set, in the order the picker shows them: simplest first, so the
  * first three options cover every shape. Then the code templates — a run of
  * snippets, a refactor told as a diff, and one demo with its output — and
@@ -392,6 +512,18 @@ export const SCENE_JSON_TEMPLATES: readonly SceneJsonTemplate[] = [
     label: "Code demo with output",
     hint: "One snippet and its terminal output printing as the scene plays.",
     json: JSON.stringify(codeDemo, null, 2),
+  },
+  {
+    id: "social-short",
+    label: "Social short (9:16)",
+    hint: "Vertical hook, one typed snippet, call to action for Reels/TikTok/Shorts.",
+    json: JSON.stringify(socialShort, null, 2),
+  },
+  {
+    id: "social-tutorial",
+    label: "Social coding tutorial",
+    hint: "Vertical tutorial: title, three typed steps, terminal proof.",
+    json: JSON.stringify(socialTutorial, null, 2),
   },
   {
     id: "episode",

@@ -1,9 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Clapperboard, FileText, LibraryBig } from "lucide-react";
+import { LibraryBig } from "lucide-react";
 
 import { useLibraryOpen } from "@/components/editor/library-toggle";
 import { APP_VERSION } from "@/lib/app-version";
@@ -18,23 +16,7 @@ import { APP_VERSION } from "@/lib/app-version";
  * the two tools.
  */
 export function StudioHeader({ right }: { right?: React.ReactNode }) {
-  const pathname = usePathname();
   const [libraryOpen, setLibraryOpen] = useLibraryOpen();
-
-  // One array rather than two hand-copied Link blocks: the last of the two was
-  // the first to drift out of sync with the other, and an active tab that
-  // highlights the wrong tool is worse than no active state at all.
-  const tools = [
-    { href: "/manuscript-editor", label: "Manuscript Editor", icon: FileText },
-    { href: "/video-editor", label: "Video Editor", icon: Clapperboard },
-  ] as const;
-
-  const tabClass = (active: boolean) =>
-    `flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-      active
-        ? "bg-background text-foreground shadow-sm"
-        : "text-muted-foreground hover:text-foreground"
-    }`;
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b bg-background px-4">
@@ -63,21 +45,6 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
           <LibraryBig className="size-4" />
           <span className="sr-only">Open asset library</span>
         </button>
-        <div
-          className="ml-1 flex items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5"
-          role="group"
-          aria-label="Studio mode"
-        >
-          {tools.map(({ href, label, icon: ToolIcon }) => {
-            const active = pathname.startsWith(href);
-            return (
-              <Link key={href} href={href} aria-pressed={active} className={tabClass(active)}>
-                <ToolIcon className="size-3.5" />
-                {label}
-              </Link>
-            );
-          })}
-        </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-3">

@@ -154,8 +154,9 @@ export const CODE_PANEL_THEMES: readonly CodePanelTheme[] = [
  */
 export const CODE_REVEAL_LABELS: Record<CodeReveal, string> = {
   all: "All at once",
-  typed: "Typed out",
+  typed: "Typed",
   lines: "Line by line",
+  word: "Word by word",
 };
 
 /**
@@ -319,7 +320,13 @@ function revealState(
   for (let i = 0; i < lines.length; i++) {
     const length = lineText(lines[i]!).length;
     if (seen + length > wanted) {
-      return { whole: i, partial: clamp(wanted - seen, 0, length) };
+      let partial = clamp(wanted - seen, 0, length);
+      if (reveal === "word") {
+        const text = lineText(lines[i]!);
+        const boundary = text.lastIndexOf(" ", partial - 1);
+        partial = boundary >= 0 ? boundary + 1 : 0;
+      }
+      return { whole: i, partial };
     }
     seen += length + 1; // the newline counts, so the cursor walks the file
   }

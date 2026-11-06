@@ -158,7 +158,8 @@ describe("codePanelTheme", () => {
   });
 
   it("names every reveal for the inspector", () => {
-    assert.deepEqual(Object.keys(CODE_REVEAL_LABELS).sort(), ["all", "lines", "typed"]);
+    assert.deepEqual(Object.keys(CODE_REVEAL_LABELS).sort(), ["all", "lines", 
+"typed", "word"]);
   });
 });
 

@@ -641,7 +641,7 @@ export function suggestedFilename(markdown: string): string {
   const raw = heading ? heading.replace(/^#{1,6}\s*/, "") : "document";
   const slug = raw
     .normalize("NFKD")
-    .replace(/[^\u0300-\u036f]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[*_`]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")

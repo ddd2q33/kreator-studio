@@ -168,7 +168,7 @@ export type SceneCode = {
 };
 
 /** How a snippet appears over the life of the scene. */
-export const CODE_REVEALS = ["all", "typed", "lines"] as const;
+export const CODE_REVEALS = ["all", "typed", "lines", "word"] as const;
 export type CodeReveal = (typeof CODE_REVEALS)[number];
 
 /** Bounds for `scale`, so a hand-edited file cannot ask for a 4px font. */
