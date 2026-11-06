@@ -5711,6 +5711,10 @@ export function VideoStudio({
                 <button
                   type="button"
                   onClick={() => {
+                    if (batchMode) {
+                      toggleBatchScene(scene.id);
+                      return;
+                    }
                     setSelectedId(scene.id);
                     if (playing) playFrom(i);
                     else seekTo(start);
