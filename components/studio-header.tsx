@@ -31,6 +31,9 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
           className="size-7 shrink-0 object-contain"
         />
         <h1 className="text-sm font-semibold tracking-tight">Kreator Studio</h1>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+          v{APP_VERSION}
+        </span>
         <button
           type="button"
           onClick={() => setLibraryOpen(true)}
@@ -49,15 +52,6 @@ export function StudioHeader({ right }: { right?: React.ReactNode }) {
 
       <div className="flex shrink-0 items-center gap-3">
         {right}
-        {/* Build info, not brand. It is the least interesting thing in the bar,
-            so it goes in the corner at the lowest contrast rather than sitting
-            next to the name where it competes with it. */}
-        <span
-          className="font-mono text-[10px] tabular-nums text-muted-foreground/50"
-          title={`Kreator Studio ${APP_VERSION}`}
-        >
-          v{APP_VERSION}
-        </span>
       </div>
     </header>
   );
