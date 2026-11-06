@@ -1106,10 +1106,20 @@ function paintSceneCodeFrame(
       h * 0.03;
   }
 
+  // Tie the code reveal to the narration's own clock when word timings exist,
+  // so the snippet appears exactly as it is spoken instead of on a fixed
+  // fraction of the scene's duration.
+  let codeProgress = t;
+  if (subtitle && subtitle.words.length > 0 && subtitle.end > subtitle.start) {
+    codeProgress = Math.max(
+      0,
+      Math.min(1, (now - subtitle.start) / (subtitle.end - subtitle.start)),
+    );
+  }
   let cardBottom = 0;
   paintCodePanel(ctx, w, h, {
     code: scene.code!,
-    progress: t,
+    progress: codeProgress,
     reservedBottom: reserved,
     onLayout: (layout) => {
       cardBottom = layout.y + layout.h;
