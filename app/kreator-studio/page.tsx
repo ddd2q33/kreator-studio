@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { VideoStudio } from "@/components/editor/video-studio";
-import { StudioHeader } from "@/components/studio-header";
 import type { Chapter } from "@/lib/projects";
 import {
   loadVideoImages,
@@ -100,7 +99,6 @@ export default function VideoEditorPage() {
 
   return (
     <>
-      <StudioHeader />
       <div className="flex min-h-0 flex-1 flex-col">
         {state ? (
           <>

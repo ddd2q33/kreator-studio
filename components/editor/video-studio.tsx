@@ -177,6 +177,7 @@ import { ExportHub } from "@/components/editor/export-hub";
 import type { ExportTarget as ExportTargetSpec } from "@/components/editor/export-hub";
 import { AssetLibrary } from "@/components/editor/asset-library";
 import { useLibraryOpen } from "@/components/editor/library-toggle";
+import { StudioHeader } from "@/components/studio-header";
 import type { Asset } from "@/lib/asset-library";
 import {
   EXPORT_FPS,
@@ -4204,70 +4205,68 @@ export function VideoStudio({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex h-11 shrink-0 items-center gap-3 border-b bg-muted/40 px-3">
-        <div className="flex min-w-0 items-center gap-2" />
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          <Button
-            variant={libraryOpen ? "secondary" : "outline"}
-            size="sm"
-            className="h-6 gap-1 px-2 text-[11px]"
-            onClick={() => setLibraryOpen(!libraryOpen)}
-            title="Images, illustrations, logos, icons, audio and video you keep for both studios"
-          >
-            <LibraryBig className="size-3" />
-            Library
-          </Button>
-          <div
-            className="flex items-center gap-1.5"
-            title="Brand accent color"
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Accent
-            </span>
-            <input
-              type="color"
-              value={brand}
-              onChange={(e) => setBrand(e.target.value)}
-              className="h-6 w-8 cursor-pointer rounded border bg-background p-0.5"
-              aria-label="Brand accent color"
-            />
-          </div>
-          <div className="flex items-center gap-1.5" title="Canvas resolution">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Res
-            </span>
-            <select
-              value={resolution}
-              onChange={(e) => setResolution(e.target.value)}
-              className="h-6 rounded border bg-background px-1.5 text-[11px] outline-none focus:border-ring"
-              aria-label="Video resolution"
+      <StudioHeader
+        right={
+          <>
+            <Button
+              variant={libraryOpen ? "secondary" : "outline"}
+              size="sm"
+              className="h-6 gap-1 px-2 text-[11px]"
+              onClick={() => setLibraryOpen(!libraryOpen)}
+              title="Images, illustrations, logos, icons, audio and video you keep for both studios"
             >
-              {RESOLUTIONS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPortrait((p) => !p)}
-            title="Toggle portrait / landscape"
-            className="h-6 gap-1 px-2 text-[11px]"
-          >
-            <RotateCcw className="size-3" />
-            {portrait ? "Vertical" : "Horizontal"}
-          </Button>
-          <input
-            value={fileName}
-            onChange={(e) => setFileName(e.target.value)}
-            className="h-6 w-24 rounded border bg-background px-2 font-mono text-[11px] outline-none focus:border-ring"
-            aria-label="Output filename"
-            title="Output filename"
-          />
-        </div>
-      </div>
+              <LibraryBig className="size-3" />
+              Library
+            </Button>
+            <div className="flex items-center gap-1.5" title="Brand accent color">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Accent
+              </span>
+              <input
+                type="color"
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+                className="h-6 w-8 cursor-pointer rounded border bg-background p-0.5"
+                aria-label="Brand accent color"
+              />
+            </div>
+            <div className="flex items-center gap-1.5" title="Canvas resolution">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Res
+              </span>
+              <select
+                value={resolution}
+                onChange={(e) => setResolution(e.target.value)}
+                className="h-6 rounded border bg-background px-1.5 text-[11px] outline-none focus:border-ring"
+                aria-label="Video resolution"
+              >
+                {RESOLUTIONS.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPortrait((p) => !p)}
+              title="Toggle portrait / landscape"
+              className="h-6 gap-1 px-2 text-[11px]"
+            >
+              <RotateCcw className="size-3" />
+              {portrait ? "Vertical" : "Horizontal"}
+            </Button>
+            <input
+              value={fileName}
+              onChange={(e) => setFileName(e.target.value)}
+              className="h-6 w-24 rounded border bg-background px-2 font-mono text-[11px] outline-none focus:border-ring"
+              aria-label="Output filename"
+              title="Output filename"
+            />
+          </>
+        }
+      />
 
       <div
         className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:flex"
