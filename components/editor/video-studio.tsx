@@ -5102,12 +5102,6 @@ export function VideoStudio({
               onChange={setSubtitleStyleId}
               disabled={!subtitlesOn}
             />
-            <ExportHub
-              targets={hubTargets}
-              defaultId="mp4"
-              className="ml-1"
-              onCancel={cancelExport}
-            />
           </div>
         </div>
 
