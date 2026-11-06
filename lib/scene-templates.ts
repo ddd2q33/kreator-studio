@@ -356,8 +356,52 @@ const codeDemo = {
 };
 
 /**
- * A vertical short for social platforms: a hook, one typed snippet, and a call
- * to action. Portrait canvas, caption style built for watching muted.
+ * One complete, polished code scene: a real function, line-by-line reveal,
+ * spotlighted and named key lines, and a terminal proving the result.
+ */
+const completeCode = {
+  title: "Memoise a function",
+  kicker: "COMPLETE EXAMPLE",
+  narration:
+    "Memoisation turns an exponential walk into a linear one, and here is the whole thing in one scene.",
+  duration: 8,
+  transition: "zoom",
+  code: {
+    language: "typescript",
+    source: [
+      "function memo<T>(compute: (n: number) => T) {",
+      "  const cache = new Map<number, T>();",
+      "  return (n: number): T => {",
+      "    if (cache.has(n)) return cache.get(n)!;",
+      "    const value = compute(n);",
+      "    cache.set(n, value);",
+      "    return value;",
+      "  };",
+      "}",
+    ].join("\n"),
+    theme: "midnight",
+    reveal: "lines",
+    scale: 1.05,
+    callouts: {
+      4: "cache hit",
+      5: "compute once",
+      6: "store result",
+    },
+    focus: [4, 5, 6],
+  },
+  terminal: {
+    title: "node memo.test.js",
+    output: [
+      "memo(fib)(10) -> 55",
+      "memo(fib)(10) -> 55 (cached)",
+      "computations: 1",
+      "3 passing",
+    ],
+  },
+};
+
+/**
+ * A vertical short for social platforms: a hook, one typed snippet, and a call * to action. Portrait canvas, caption style built for watching muted.
  */
 const socialShort = {
   version: 1,
@@ -512,6 +556,12 @@ export const SCENE_JSON_TEMPLATES: readonly SceneJsonTemplate[] = [
     label: "Code demo with output",
     hint: "One snippet and its terminal output printing as the scene plays.",
     json: JSON.stringify(codeDemo, null, 2),
+  },
+  {
+    id: "complete-code",
+    label: "Complete code example",
+    hint: "One polished scene: function, callouts, focus and terminal proof.",
+    json: JSON.stringify(completeCode, null, 2),
   },
   {
     id: "social-short",
